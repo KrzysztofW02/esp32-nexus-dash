@@ -21,8 +21,9 @@ const char* password = WIFI_PASSWORD;
 #define C_GREEN     0x07E0 
 #define C_RED       0xF800 
 #define C_BAR_BG    0x1021 
+#define C_BLACK     0x0000
+#define C_DARK_GREEN 0x03E0 
 
-// ASSET COLORS
 #define C_BTC_YELLOW 0xF7E0 
 #define C_ETH_PURPLE 0x981F 
 
@@ -66,10 +67,10 @@ NTPClient timeClient(ntpUDP, "pool.ntp.org", 3600, 60000);
 WebServer server(80);
 
 // FINANCIAL VARIABLES
-float kursBTC = 0.0; float staryKursBTC = 0.0; float zmiana24BTC = 0.0; int dirBTC = 0;           
-float kursETH = 0.0; float staryKursETH = 0.0; float zmiana24ETH = 0.0; int dirETH = 0;
-float kursUSD = 0.0; float staryKursUSD = 0.0; float zmiana24USD = 0.0; int dirUSD = 0;
-float kursEUR = 0.0; float staryKursEUR = 0.0; float zmiana24EUR = 0.0; int dirEUR = 0;
+float courseBTC = 0.0; float oldBTC = 0.0; float change24BTC = 0.0; int dirBTC = 0;           
+float courseETH = 0.0; float oldETH = 0.0; float change24ETH = 0.0; int dirETH = 0;
+float courseUSD = 0.0; float oldUSD = 0.0; float change24USD = 0.0; int dirUSD = 0;
+float courseEUR = 0.0; float oldEUR = 0.0; float change24EUR = 0.0; int dirEUR = 0;
 
 // HISTORY 
 const int GRAPH_POINTS = 40; 
@@ -80,7 +81,6 @@ unsigned long lastUpdateData = 0;
 unsigned long lastClockUpdate = 0;
 
 // HELPER FUNCTIONS
-
 void updateHistory(float* history, float newPrice) {
   if (newPrice < 0.1 || isnan(newPrice)) return;
   for (int i = 0; i < GRAPH_POINTS - 1; i++) history[i] = history[i+1];
@@ -88,8 +88,7 @@ void updateHistory(float* history, float newPrice) {
   else history[GRAPH_POINTS - 1] = newPrice;
 }
 
-// DRAWING
-
+// DRAWING PRIMITIVES
 void drawSeparator(int y) {
   gfx->fillRect(20, y, 984, 2, C_GRAY);
 }
@@ -120,30 +119,45 @@ void drawCenteredPercentage(int centerX, int y, float percent) {
 void drawMountainChart(int x, int y, int w, int h, float* data, uint16_t color) {
   float minVal = data[0];
   float maxVal = data[0];
-  
   for(int i=1; i<GRAPH_POINTS; i++) {
     if(data[i] < minVal) minVal = data[i];
     if(data[i] > maxVal) maxVal = data[i];
   }
-
   float range = maxVal - minVal;
-  if (range < 0.0001) { 
-      gfx->drawFastHLine(x, y + h/2, w, C_GRAY); 
-      return;
-  }
+  if (range < 0.0001) { gfx->drawFastHLine(x, y + h/2, w, C_GRAY); return; }
 
   int step = w / GRAPH_POINTS; 
-
   for (int i = 0; i < GRAPH_POINTS; i++) {
     float normalized = (data[i] - minVal) / range;
     int barHeight = (int)(normalized * h);
     if (barHeight < 2) barHeight = 2;
     if (barHeight > h) barHeight = h;
-
     int xPos = x + (i * step);
     int yPos = y + h - barHeight;
     gfx->fillRect(xPos, yPos, step - 1, barHeight, color);
   }
+}
+
+// ICONS
+void drawBTCLogo(int x, int y) {
+  gfx->fillCircle(x + 16, y + 16, 16, C_BTC_YELLOW);
+  gfx->setTextSize(3);
+  gfx->setTextColor(C_BLACK); 
+  gfx->setCursor(x + 10, y + 6);
+  gfx->print("B");
+}
+
+void drawETHLogo(int x, int y) {
+  gfx->fillTriangle(x + 16, y, x + 6, y + 18, x + 26, y + 18, C_ETH_PURPLE);
+  gfx->fillTriangle(x + 16, y + 32, x + 6, y + 20, x + 26, y + 20, C_ETH_PURPLE);
+}
+
+void drawEuroLogo(int x, int y) {
+  gfx->fillCircle(x + 18, y + 18, 18, C_BTC_YELLOW);
+  gfx->fillCircle(x + 22, y + 18, 14, C_BG);
+  gfx->fillRect(x + 22, y, 20, 36, C_BG);
+  gfx->fillRect(x + 2, y + 12, 24, 4, C_BTC_YELLOW);
+  gfx->fillRect(x + 2, y + 20, 24, 4, C_BTC_YELLOW);
 }
 
 // TOP BAR
@@ -181,35 +195,37 @@ void drawCryptoSection() {
   // BTC
   int btcX = 30; int btcCenterAxis = 405; 
   
+  drawBTCLogo(btcX, 70);
+
   gfx->setTextSize(3);
   gfx->setTextColor(C_ACCENT); 
-  gfx->setCursor(btcX, 80); gfx->print("BITCOIN");
+  gfx->setCursor(btcX + 45, 80); gfx->print("BITCOIN");
   
   gfx->setTextSize(6);
-  gfx->setTextColor(C_TEXT);   
-  gfx->setCursor(btcX, 140); gfx->print(kursBTC, 1); 
+  gfx->setTextColor(C_TEXT); 
+  gfx->setCursor(btcX, 140); gfx->print(courseBTC, 1); 
   gfx->setTextSize(2); gfx->print(" USD");
   
   drawTrendArrow(btcCenterAxis - 25, 140, 50, dirBTC);
-  drawCenteredPercentage(btcCenterAxis, 220, zmiana24BTC);
-  
+  drawCenteredPercentage(btcCenterAxis, 220, change24BTC);
   drawMountainChart(btcX, 270, 450, 70, historyBTC, C_ACCENT);
 
-  // ETH 
+  // ETH
   int ethX = 540; int ethCenterAxis = 915;
   
+  drawETHLogo(ethX, 70);
+
   gfx->setTextSize(3);
   gfx->setTextColor(C_ACCENT); 
-  gfx->setCursor(ethX, 80); gfx->print("ETHEREUM");
+  gfx->setCursor(ethX + 45, 80); gfx->print("ETHEREUM");
   
   gfx->setTextSize(6);
   gfx->setTextColor(C_TEXT);   
-  gfx->setCursor(ethX, 140); gfx->print(kursETH, 1); 
+  gfx->setCursor(ethX, 140); gfx->print(courseETH, 1); 
   gfx->setTextSize(2); gfx->print(" USD");
   
   drawTrendArrow(ethCenterAxis - 25, 140, 50, dirETH);
-  drawCenteredPercentage(ethCenterAxis, 220, zmiana24ETH);
-  
+  drawCenteredPercentage(ethCenterAxis, 220, change24ETH);
   drawMountainChart(ethX, 270, 450, 70, historyETH, C_ACCENT);
 }
 
@@ -222,36 +238,45 @@ void drawFiatSection() {
   int eurX = 50; 
   int eurCenterAxis = 350;
 
+  drawEuroLogo(eurX, 390);
+
   gfx->setTextSize(3);
   gfx->setTextColor(C_ACCENT);
-  gfx->setCursor(eurX, 400);
+  gfx->setCursor(eurX + 45, 400);
   gfx->print("EUR / PLN");
-  
-  gfx->setTextSize(5);
+
+  gfx->setTextSize(6); 
   gfx->setTextColor(C_TEXT); 
   gfx->setCursor(eurX, 450);
-  gfx->print(kursEUR, 4);
+  gfx->print(courseEUR, 4);
 
-  drawTrendArrow(eurCenterAxis, 450, 40, dirEUR);
-  drawCenteredPercentage(eurCenterAxis + 20, 530, zmiana24EUR);
+  drawTrendArrow(eurCenterAxis, 450, 50, dirEUR); 
+  
+  drawCenteredPercentage(eurCenterAxis + 20, 530, change24EUR);
 
 
   // RIGHT: USD
   int usdX = 550;
   int usdCenterAxis = 850;
 
+  gfx->setTextSize(5);
+  gfx->setTextColor(C_DARK_GREEN); 
+  gfx->setCursor(usdX, 390);
+  gfx->print("$");
+
   gfx->setTextSize(3);
   gfx->setTextColor(C_ACCENT);
-  gfx->setCursor(usdX, 400);
+  gfx->setCursor(usdX + 45, 400);
   gfx->print("USD / PLN");
   
-  gfx->setTextSize(5);
-  gfx->setTextColor(C_TEXT);
+  gfx->setTextSize(6);
+  gfx->setTextColor(C_TEXT); 
   gfx->setCursor(usdX, 450);
-  gfx->print(kursUSD, 4);
+  gfx->print(courseUSD, 4);
 
-  drawTrendArrow(usdCenterAxis, 450, 40, dirUSD);
-  drawCenteredPercentage(usdCenterAxis + 20, 530, zmiana24USD);
+  drawTrendArrow(usdCenterAxis, 450, 50, dirUSD);
+  
+  drawCenteredPercentage(usdCenterAxis + 20, 530, change24USD);
 }
 
 // NETWORK LOGIC
@@ -268,10 +293,10 @@ void fetchAllData() {
         JsonDocument doc;
         deserializeJson(doc, payload);
         float nowy = doc["lastPrice"].as<float>();
-        zmiana24BTC = doc["priceChangePercent"].as<float>();
-        if (staryKursBTC != 0) { if (nowy > staryKursBTC) dirBTC = 1; else if (nowy < staryKursBTC) dirBTC = -1; }
-        staryKursBTC = nowy; kursBTC = nowy;
-        updateHistory(historyBTC, kursBTC);
+        change24BTC = doc["priceChangePercent"].as<float>();
+        if (oldBTC != 0) { if (nowy > oldBTC) dirBTC = 1; else if (nowy < oldBTC) dirBTC = -1; }
+        oldBTC = nowy; courseBTC = nowy;
+        updateHistory(historyBTC, courseBTC);
       }
       http.end();
     }
@@ -283,10 +308,10 @@ void fetchAllData() {
         JsonDocument doc;
         deserializeJson(doc, payload);
         float nowy = doc["lastPrice"].as<float>();
-        zmiana24ETH = doc["priceChangePercent"].as<float>();
-        if (staryKursETH != 0) { if (nowy > staryKursETH) dirETH = 1; else if (nowy < staryKursETH) dirETH = -1; }
-        staryKursETH = nowy; kursETH = nowy;
-        updateHistory(historyETH, kursETH);
+        change24ETH = doc["priceChangePercent"].as<float>();
+        if (oldETH != 0) { if (nowy > oldETH) dirETH = 1; else if (nowy < oldETH) dirETH = -1; }
+        oldETH = nowy; courseETH = nowy;
+        updateHistory(historyETH, courseETH);
       }
       http.end();
     }
@@ -302,9 +327,9 @@ void fetchAllData() {
         float nowy = doc["lastPrice"].as<float>();
         usdtPlnPrice = nowy;
         usdtPlnChange = doc["priceChangePercent"].as<float>();
-        zmiana24USD = usdtPlnChange;
-        if (staryKursUSD != 0) { if (nowy > staryKursUSD) dirUSD = 1; else if (nowy < staryKursUSD) dirUSD = -1; }
-        staryKursUSD = nowy; kursUSD = nowy;
+        change24USD = usdtPlnChange;
+        if (oldUSD != 0) { if (nowy > oldUSD) dirUSD = 1; else if (nowy < oldUSD) dirUSD = -1; }
+        oldUSD = nowy; courseUSD = nowy;
       }
       http.end();
     }
@@ -319,9 +344,9 @@ void fetchAllData() {
         float eurUsdChange = doc["priceChangePercent"].as<float>();
         float calculatedEurPln = eurUsdPrice * usdtPlnPrice;
         float calculatedChange = eurUsdChange + usdtPlnChange;
-        zmiana24EUR = calculatedChange;
-        if (staryKursEUR != 0) { if (calculatedEurPln > staryKursEUR) dirEUR = 1; else if (calculatedEurPln < staryKursEUR) dirEUR = -1; }
-        staryKursEUR = calculatedEurPln; kursEUR = calculatedEurPln;
+        change24EUR = calculatedChange;
+        if (oldEUR != 0) { if (calculatedEurPln > oldEUR) dirEUR = 1; else if (calculatedEurPln < oldEUR) dirEUR = -1; }
+        oldEUR = calculatedEurPln; courseEUR = calculatedEurPln;
       }
       http.end();
     }
