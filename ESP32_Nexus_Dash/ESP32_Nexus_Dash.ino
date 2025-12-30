@@ -1,3 +1,4 @@
+#include <U8g2lib.h>
 #include <Arduino_GFX_Library.h>
 #include <Wire.h>
 #include <WiFi.h>
@@ -100,12 +101,14 @@ void drawTrendArrow(int x, int y, int size, int direction) {
 }
 
 void drawCenteredPercentage(int centerX, int y, float percent) {
-  gfx->setTextSize(3); 
-  String text = "";
-  if (percent > 0) text = "24h: +" + String(percent) + "%";
-  else text = "24h: " + String(percent) + "%";
+  gfx->setFont(u8g2_font_helvB18_tr);
+  gfx->setTextSize(1);
   
-  int textWidth = text.length() * 18;
+  String text = "";
+  if (percent > 0) text = "24h: +" + String(percent, 2) + "%";
+  else text = "24h: " + String(percent, 2) + "%";
+  
+  int textWidth = text.length() * 11;
   int cursorX = centerX - (textWidth / 2);
 
   if (percent > 0) gfx->setTextColor(C_GREEN);
@@ -114,6 +117,7 @@ void drawCenteredPercentage(int centerX, int y, float percent) {
 
   gfx->setCursor(cursorX, y);
   gfx->print(text);
+  gfx->setFont((const GFXfont*)nullptr);
 }
 
 void drawMountainChart(int x, int y, int w, int h, float* data, uint16_t color) {
@@ -165,27 +169,34 @@ void drawTopBarStatic() {
    gfx->fillRect(0, 0, 1024, 50, C_BAR_BG); 
    gfx->drawRect(0, 50, 1024, 2, C_ACCENT); 
    
-   gfx->setTextSize(2);
+   gfx->setFont(u8g2_font_helvB14_tr); 
+   gfx->setTextSize(1);
    gfx->setTextColor(C_ACCENT); 
-   gfx->setCursor(20, 15);
+   gfx->setCursor(20, 35);
    gfx->print("SYSTEM: ONLINE");
    
    gfx->setTextColor(C_TEXT);
-   gfx->setCursor(800, 15);
-   gfx->print("IP: ");
-   gfx->print(WiFi.localIP());
+   String ipStr = "IP: " + WiFi.localIP().toString();
+   int ipWidth = ipStr.length() * 9;  
+   gfx->setCursor(1024 - ipWidth - 15, 35);  
+   gfx->print(ipStr);
+   
+   gfx->setFont((const GFXfont*)nullptr);
 }
 
 void updateTopClock() {
   timeClient.update();
   String timeStr = timeClient.getFormattedTime();
-  gfx->fillRect(400, 5, 224, 40, C_BAR_BG); 
-  gfx->setTextSize(3);
-  int textWidth = timeStr.length() * 18; 
-  int cursorX = 512 - (textWidth / 2);
-  gfx->setTextColor(C_TEXT); 
-  gfx->setCursor(cursorX, 15); 
+  
+  gfx->fillRect(380, 0, 280, 48, C_BAR_BG);
+  
+  gfx->setFont(u8g2_font_profont29_mn);
+  gfx->setTextSize(1);
+  gfx->setTextColor(C_TEXT, C_BAR_BG);
+  gfx->setCursor(444, 38);
   gfx->print(timeStr);
+  
+  gfx->setFont((const GFXfont*)nullptr);
 }
 
 void drawCryptoSection() {
@@ -197,14 +208,22 @@ void drawCryptoSection() {
   
   drawBTCLogo(btcX, 70);
 
-  gfx->setTextSize(3);
+  gfx->setFont(u8g2_font_helvB18_tr);  
+  gfx->setTextSize(1);
   gfx->setTextColor(C_ACCENT); 
-  gfx->setCursor(btcX + 45, 80); gfx->print("BITCOIN");
+  gfx->setCursor(btcX + 45, 100);
+  gfx->print("BITCOIN");
   
-  gfx->setTextSize(6);
+  gfx->setFont(u8g2_font_logisoso46_tn);  
+  gfx->setTextSize(1);
   gfx->setTextColor(C_TEXT); 
-  gfx->setCursor(btcX, 140); gfx->print(courseBTC, 1); 
-  gfx->setTextSize(2); gfx->print(" USD");
+  gfx->setCursor(btcX, 180);
+  gfx->print(courseBTC, 1);
+  
+  gfx->setFont(u8g2_font_helvB14_tr);
+  gfx->print(" USD");
+  
+  gfx->setFont((const GFXfont*)nullptr);
   
   drawTrendArrow(btcCenterAxis - 25, 140, 50, dirBTC);
   drawCenteredPercentage(btcCenterAxis, 220, change24BTC);
@@ -215,14 +234,22 @@ void drawCryptoSection() {
   
   drawETHLogo(ethX, 70);
 
-  gfx->setTextSize(3);
+  gfx->setFont(u8g2_font_helvB18_tr);
+  gfx->setTextSize(1);
   gfx->setTextColor(C_ACCENT); 
-  gfx->setCursor(ethX + 45, 80); gfx->print("ETHEREUM");
+  gfx->setCursor(ethX + 45, 100);
+  gfx->print("ETHEREUM");
   
-  gfx->setTextSize(6);
+  gfx->setFont(u8g2_font_logisoso46_tn);
+  gfx->setTextSize(1);
   gfx->setTextColor(C_TEXT);   
-  gfx->setCursor(ethX, 140); gfx->print(courseETH, 1); 
-  gfx->setTextSize(2); gfx->print(" USD");
+  gfx->setCursor(ethX, 180);
+  gfx->print(courseETH, 1);
+  
+  gfx->setFont(u8g2_font_helvB14_tr);
+  gfx->print(" USD");
+  
+  gfx->setFont((const GFXfont*)nullptr);
   
   drawTrendArrow(ethCenterAxis - 25, 140, 50, dirETH);
   drawCenteredPercentage(ethCenterAxis, 220, change24ETH);
@@ -240,43 +267,51 @@ void drawFiatSection() {
 
   drawEuroLogo(eurX, 390);
 
-  gfx->setTextSize(3);
+  gfx->setFont(u8g2_font_helvB18_tr);
+  gfx->setTextSize(1);
   gfx->setTextColor(C_ACCENT);
-  gfx->setCursor(eurX + 45, 400);
+  gfx->setCursor(eurX + 45, 420);
   gfx->print("EUR / PLN");
 
-  gfx->setTextSize(6); 
+  gfx->setFont(u8g2_font_logisoso46_tn);  
+  gfx->setTextSize(1);
   gfx->setTextColor(C_TEXT); 
-  gfx->setCursor(eurX, 450);
+  gfx->setCursor(eurX, 500);
   gfx->print(courseEUR, 4);
 
-  drawTrendArrow(eurCenterAxis, 450, 50, dirEUR); 
+  gfx->setFont((const GFXfont*)nullptr);
+
+  drawTrendArrow(eurCenterAxis, 460, 50, dirEUR); 
   
-  drawCenteredPercentage(eurCenterAxis + 20, 530, change24EUR);
+  drawCenteredPercentage(eurCenterAxis + 20, 540, change24EUR);
 
 
   // RIGHT: USD
   int usdX = 550;
   int usdCenterAxis = 850;
 
-  gfx->setTextSize(5);
+  gfx->setFont(u8g2_font_logisoso32_tr);  
+  gfx->setTextSize(1);
   gfx->setTextColor(C_DARK_GREEN); 
-  gfx->setCursor(usdX, 390);
+  gfx->setCursor(usdX, 420);
   gfx->print("$");
 
-  gfx->setTextSize(3);
+  gfx->setFont(u8g2_font_helvB18_tr);
   gfx->setTextColor(C_ACCENT);
-  gfx->setCursor(usdX + 45, 400);
+  gfx->setCursor(usdX + 35, 420);
   gfx->print("USD / PLN");
   
-  gfx->setTextSize(6);
+  gfx->setFont(u8g2_font_logisoso46_tn);  
+  gfx->setTextSize(1);
   gfx->setTextColor(C_TEXT); 
-  gfx->setCursor(usdX, 450);
+  gfx->setCursor(usdX, 500);
   gfx->print(courseUSD, 4);
 
-  drawTrendArrow(usdCenterAxis, 450, 50, dirUSD);
+  gfx->setFont((const GFXfont*)nullptr);
+
+  drawTrendArrow(usdCenterAxis, 460, 50, dirUSD);
   
-  drawCenteredPercentage(usdCenterAxis + 20, 530, change24USD);
+  drawCenteredPercentage(usdCenterAxis + 20, 540, change24USD);
 }
 
 // NETWORK LOGIC
