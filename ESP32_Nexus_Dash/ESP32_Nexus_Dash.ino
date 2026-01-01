@@ -65,28 +65,27 @@ Arduino_RGB_Display *gfx = new Arduino_RGB_Display(1024, 600, rgbpanel);
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", 3600, 60000); 
 
-WebServer server(80);
-
 // FINANCIAL VARIABLES
-float courseBTC = 0.0; float oldBTC = 0.0; float change24BTC = 0.0; float change1MBTC = 0.0; float liveChangeBTC = 0.0; int dirBTC = 0;          
-float courseETH = 0.0; float oldETH = 0.0; float change24ETH = 0.0; float change1METH = 0.0; float liveChangeETH = 0.0; int dirETH = 0;
-float courseUSD = 0.0; float oldUSD = 0.0; float change24USD = 0.0; float change1MUSD = 0.0; float liveChangeUSD = 0.0; int dirUSD = 0;
-float courseEUR = 0.0; float oldEUR = 0.0; float change24EUR = 0.0; float change1MEUR = 0.0; float liveChangeEUR = 0.0; int dirEUR = 0;
+volatile float courseBTC = 0.0; float oldBTC = 0.0; volatile float change24BTC = 0.0; volatile float change1MBTC = 0.0; volatile float liveChangeBTC = 0.0; volatile int dirBTC = 0;          
+volatile float courseETH = 0.0; float oldETH = 0.0; volatile float change24ETH = 0.0; volatile float change1METH = 0.0; volatile float liveChangeETH = 0.0; volatile int dirETH = 0;
+volatile float courseUSD = 0.0; float oldUSD = 0.0; volatile float change24USD = 0.0; volatile float change1MUSD = 0.0; volatile float liveChangeUSD = 0.0; volatile int dirUSD = 0;
+volatile float courseEUR = 0.0; float oldEUR = 0.0; volatile float change24EUR = 0.0; volatile float change1MEUR = 0.0; volatile float liveChangeEUR = 0.0; volatile int dirEUR = 0;
+
+bool dataReadyToDraw = false; 
 
 // HISTORY 
 const int GRAPH_POINTS = 40; 
 float historyBTC[GRAPH_POINTS];
 float historyETH[GRAPH_POINTS];
 
-unsigned long lastUpdateData = 0; 
 unsigned long lastClockUpdate = 0;
 
-// HELPER FUNCTIONS
 void updateHistory(float* history, float newPrice) {
-  if (newPrice < 0.1 || isnan(newPrice)) return;
+  if (newPrice < 0.00001 || isnan(newPrice)) return;
+  
   for (int i = 0; i < GRAPH_POINTS - 1; i++) history[i] = history[i+1];
-  if (history[0] == 0) for(int i=0; i<GRAPH_POINTS; i++) history[i] = newPrice;
-  else history[GRAPH_POINTS - 1] = newPrice;
+  
+  history[GRAPH_POINTS - 1] = newPrice;
 }
 
 float getMonthlyOpen(const char* symbol) {
@@ -94,32 +93,31 @@ float getMonthlyOpen(const char* symbol) {
   client.setInsecure();
   HTTPClient http;
   float openPrice = 0.0;
-  
-  // 1 Month interval
+  http.setTimeout(3000); 
   String url = "https://api.binance.com/api/v3/klines?symbol=" + String(symbol) + "&interval=1M&limit=1";
-  
   if (http.begin(client, url)) {
-    int httpCode = http.GET();
-    if (httpCode == 200) {
+    if (http.GET() == 200) {
       String payload = http.getString();
       JsonDocument doc;
       DeserializationError error = deserializeJson(doc, payload);
-      if (!error) {
-        openPrice = doc[0][1].as<float>();
-      }
+      if (!error) openPrice = doc[0][1].as<float>();
     }
     http.end();
   }
   return openPrice;
 }
 
+// DRAWING HELPERS
+void cleanRect(int x, int y, int w, int h) {
+    gfx->fillRect(x, y, w, h, C_BG);
+}
 
-// DRAWING PRIMITIVES
 void drawSeparator(int y) {
   gfx->fillRect(20, y, 984, 2, C_GRAY);
 }
 
 void drawTrendArrow(int x, int y, int size, int direction) {
+  cleanRect(x - 5, y - 5, size + 10, size + 10);
   if (direction == 1) gfx->fillTriangle(x, y + size, x + (size/2), y, x + size, y + size, C_GREEN);
   else if (direction == -1) gfx->fillTriangle(x, y, x + (size/2), y + size, x + size, y, C_RED);
   else gfx->fillCircle(x + (size/2), y + (size/2), size/4, C_GRAY);
@@ -128,7 +126,8 @@ void drawTrendArrow(int x, int y, int size, int direction) {
 void drawPercentLine(int x, int y, String label, float percent) {
   gfx->setFont(u8g2_font_helvB18_tr); 
   gfx->setTextSize(1);
-  
+  cleanRect(x, y - 20, 250, 25); 
+
   String text = label + ": " + String(percent, 2) + "%";
   if (percent > 0) text = label + ": +" + String(percent, 2) + "%";
   
@@ -144,6 +143,7 @@ void drawPercentLine(int x, int y, String label, float percent) {
 void drawLiveChange(int centerX, int y, float diffPercent) {
   gfx->setFont(u8g2_font_helvB18_tr); 
   gfx->setTextSize(1);
+  cleanRect(centerX - 70, y - 25, 140, 30);
 
   String text = "";
   if (diffPercent > 0) text = "+" + String(diffPercent, 3) + "%";
@@ -162,25 +162,52 @@ void drawLiveChange(int centerX, int y, float diffPercent) {
   gfx->setFont((const GFXfont*)nullptr);
 }
 
+void drawPrice(int x, int y, float price, int precision) {
+    gfx->setFont(u8g2_font_logisoso46_tn);  
+    gfx->setTextSize(1);
+    gfx->setTextColor(C_TEXT); 
+    cleanRect(x, y - 46, 300, 50);
+
+    gfx->setCursor(x, y);
+    gfx->print(price, precision);
+    gfx->setFont((const GFXfont*)nullptr);
+}
 void drawMountainChart(int x, int y, int w, int h, float* data, uint16_t color) {
-  float minVal = data[0];
-  float maxVal = data[0];
-  for(int i=1; i<GRAPH_POINTS; i++) {
-    if(data[i] < minVal) minVal = data[i];
-    if(data[i] > maxVal) maxVal = data[i];
+  cleanRect(x, y, w, h);
+
+  float minVal = 99999999.0;
+  float maxVal = -99999999.0;
+  bool hasData = false;
+
+  for(int i=0; i<GRAPH_POINTS; i++) {
+    if(data[i] > 0.0001) {
+       if(data[i] < minVal) minVal = data[i];
+       if(data[i] > maxVal) maxVal = data[i];
+       hasData = true;
+    }
   }
+  
+  if (!hasData) return; 
+
   float range = maxVal - minVal;
-  if (range < 0.0001) { gfx->drawFastHLine(x, y + h/2, w, C_GRAY); return; }
+  if (range < 0.0001) range = 1.0; 
 
   int step = w / GRAPH_POINTS; 
+  
   for (int i = 0; i < GRAPH_POINTS; i++) {
-    float normalized = (data[i] - minVal) / range;
-    int barHeight = (int)(normalized * h);
-    if (barHeight < 2) barHeight = 2;
-    if (barHeight > h) barHeight = h;
-    int xPos = x + (i * step);
-    int yPos = y + h - barHeight;
-    gfx->fillRect(xPos, yPos, step - 1, barHeight, color);
+    if (data[i] > 0.0001) {
+        float normalized = (data[i] - minVal) / range;
+        
+        if (maxVal - minVal < 0.0001) normalized = 0.5;
+
+        int barHeight = (int)(normalized * h);
+        if (barHeight < 2) barHeight = 2;
+        if (barHeight > h) barHeight = h;
+        
+        int xPos = x + (i * step);
+        int yPos = y + h - barHeight;
+        gfx->fillRect(xPos, yPos, step - 1, barHeight, color);
+    }
   }
 }
 
@@ -210,285 +237,222 @@ void drawEuroLogo(int x, int y) {
 void drawTopBarStatic() {
    gfx->fillRect(0, 0, 1024, 50, C_BAR_BG); 
    gfx->drawRect(0, 50, 1024, 2, C_ACCENT); 
-   
    gfx->setFont(u8g2_font_helvB14_tr); 
    gfx->setTextSize(1);
    gfx->setTextColor(C_ACCENT); 
    gfx->setCursor(20, 35);
    gfx->print("SYSTEM: ONLINE");
-   
    gfx->setTextColor(C_TEXT);
    String ipStr = "IP: " + WiFi.localIP().toString();
    int ipWidth = ipStr.length() * 9;  
    gfx->setCursor(1024 - ipWidth - 15, 35);  
    gfx->print(ipStr);
-   
    gfx->setFont((const GFXfont*)nullptr);
 }
 
 void updateTopClock() {
   timeClient.update();
   String timeStr = timeClient.getFormattedTime();
-  
-  gfx->fillRect(380, 0, 280, 48, C_BAR_BG);
-  
+  gfx->fillRect(440, 0, 160, 48, C_BAR_BG);
   gfx->setFont(u8g2_font_profont29_mn);
   gfx->setTextSize(1);
-  gfx->setTextColor(C_TEXT, C_BAR_BG);
+  gfx->setTextColor(C_TEXT); 
   gfx->setCursor(444, 38);
   gfx->print(timeStr);
-  
   gfx->setFont((const GFXfont*)nullptr);
 }
 
-void drawCryptoSection() {
-  gfx->fillRect(0, 55, 1024, 300, C_BG);
-  gfx->fillRect(511, 70, 2, 270, C_GRAY);
+void drawStaticInterface() {
+    gfx->fillRect(0, 55, 1024, 300, C_BG);
+    gfx->fillRect(511, 70, 2, 270, C_GRAY);
+    gfx->fillRect(0, 360, 1024, 240, C_BG);
+    drawSeparator(360);
+    gfx->fillRect(511, 380, 2, 140, C_GRAY);
+
+    int btcX = 30; int ethX = 540;
+    int eurX = 50; int usdX = 550;
+
+    // BTC 
+    drawBTCLogo(btcX, 70);
+    gfx->setFont(u8g2_font_helvB18_tr); gfx->setTextSize(1); gfx->setTextColor(C_ACCENT); 
+    gfx->setCursor(btcX + 45, 100); gfx->print("BITCOIN");
+    gfx->setFont(u8g2_font_helvB14_tr); gfx->setCursor(btcX + 240, 180); gfx->print(" USD");
+
+    // ETH 
+    drawETHLogo(ethX, 70);
+    gfx->setFont(u8g2_font_helvB18_tr); gfx->setTextColor(C_ACCENT); 
+    gfx->setCursor(ethX + 45, 100); gfx->print("ETHEREUM");
+    gfx->setFont(u8g2_font_helvB14_tr); gfx->setCursor(ethX + 240, 180); gfx->print(" USD");
+
+    // EUR 
+    drawEuroLogo(eurX, 390);
+    gfx->setFont(u8g2_font_helvB18_tr); gfx->setTextColor(C_ACCENT);
+    gfx->setCursor(eurX + 45, 420); gfx->print("EURO"); 
+    gfx->setFont(u8g2_font_helvB14_tr); gfx->setCursor(eurX + 220, 500); gfx->print(" PLN");
+
+    // USD 
+    gfx->setFont(u8g2_font_logisoso32_tr); gfx->setTextColor(C_DARK_GREEN); gfx->setCursor(usdX, 420); gfx->print("$");
+    gfx->setFont(u8g2_font_helvB18_tr); gfx->setTextColor(C_ACCENT); gfx->setCursor(usdX + 35, 420); gfx->print("USD");
+    gfx->setFont(u8g2_font_helvB14_tr); gfx->setCursor(usdX + 220, 500); gfx->print(" PLN");
+    
+    gfx->setFont((const GFXfont*)nullptr);
+}
+
+// REFRESH DYNAMIC DATA
+void refreshDynamicData() {
+  int btcX = 30; int btcCenterAxis = 405; 
+  int ethX = 540; int ethCenterAxis = 915;
+  int eurX = 50; int eurCenterAxis = 405; 
+  int usdX = 550; int usdCenterAxis = 915;
 
   // BTC
-  int btcX = 30; int btcCenterAxis = 405; 
-  drawBTCLogo(btcX, 70);
-
-  gfx->setFont(u8g2_font_helvB18_tr);  
-  gfx->setTextSize(1);
-  gfx->setTextColor(C_ACCENT); 
-  gfx->setCursor(btcX + 45, 100);
-  gfx->print("BITCOIN");
-  
-  gfx->setFont(u8g2_font_logisoso46_tn);  
-  gfx->setTextSize(1);
-  gfx->setTextColor(C_TEXT); 
-  gfx->setCursor(btcX, 180);
-  gfx->print(courseBTC, 1);
-  
-  gfx->setFont(u8g2_font_helvB14_tr);
-  gfx->print(" USD");
-  gfx->setFont((const GFXfont*)nullptr);
-  
+  drawPrice(btcX, 180, courseBTC, 1);
   drawPercentLine(btcX, 215, "24h", change24BTC);
   drawPercentLine(btcX, 255, "1 Month", change1MBTC);
-
   drawTrendArrow(btcCenterAxis - 25, 140, 50, dirBTC);
-  
   drawLiveChange(btcCenterAxis, 220, liveChangeBTC);
-  
   drawMountainChart(btcX, 275, 450, 60, historyBTC, C_ACCENT);
 
   // ETH
-  int ethX = 540; int ethCenterAxis = 915;
-  drawETHLogo(ethX, 70);
-
-  gfx->setFont(u8g2_font_helvB18_tr);
-  gfx->setTextSize(1);
-  gfx->setTextColor(C_ACCENT); 
-  gfx->setCursor(ethX + 45, 100);
-  gfx->print("ETHEREUM");
-  
-  gfx->setFont(u8g2_font_logisoso46_tn);
-  gfx->setTextSize(1);
-  gfx->setTextColor(C_TEXT);   
-  gfx->setCursor(ethX, 180);
-  gfx->print(courseETH, 1);
-  
-  gfx->setFont(u8g2_font_helvB14_tr);
-  gfx->print(" USD");
-  gfx->setFont((const GFXfont*)nullptr);
-
+  drawPrice(ethX, 180, courseETH, 1);
   drawPercentLine(ethX, 215, "24h", change24ETH);
   drawPercentLine(ethX, 255, "1 Month", change1METH);
-
   drawTrendArrow(ethCenterAxis - 25, 140, 50, dirETH);
-  
   drawLiveChange(ethCenterAxis, 220, liveChangeETH);
-  
   drawMountainChart(ethX, 275, 450, 60, historyETH, C_ACCENT);
-}
 
-void drawFiatSection() {
-  gfx->fillRect(0, 360, 1024, 240, C_BG);
-  drawSeparator(360);
-  gfx->fillRect(511, 380, 2, 140, C_GRAY);
-
-  // LEFT: EURO
-  int eurX = 50; 
-  int eurCenterAxis = 405; 
-
-  drawEuroLogo(eurX, 390);
-
-  gfx->setFont(u8g2_font_helvB18_tr);
-  gfx->setTextSize(1);
-  gfx->setTextColor(C_ACCENT);
-  gfx->setCursor(eurX + 45, 420); 
-  gfx->print("EURO"); 
- 
-  gfx->setFont(u8g2_font_logisoso46_tn);  
-  gfx->setTextSize(1);
-  gfx->setTextColor(C_TEXT); 
-  gfx->setCursor(eurX, 500);
-  gfx->print(courseEUR, 4);
-
-  gfx->setFont(u8g2_font_helvB14_tr);
-  gfx->print(" PLN");
-  gfx->setFont((const GFXfont*)nullptr);
-
+  // EUR
+  drawPrice(eurX, 500, courseEUR, 4);
   drawPercentLine(eurX, 535, "24h", change24EUR);
-  drawPercentLine(eurX, 575, "1 Month", change1MEUR); 
-
-  drawTrendArrow(eurCenterAxis - 25, 460, 50, dirEUR); 
-  
+  drawPercentLine(eurX, 575, "1 Month", change1MEUR);
+  drawTrendArrow(eurCenterAxis - 25, 460, 50, dirEUR);
   drawLiveChange(eurCenterAxis, 540, liveChangeEUR);
 
-
-  // RIGHT: USD
-  int usdX = 550;
-  int usdCenterAxis = 915;
-
-  gfx->setFont(u8g2_font_logisoso32_tr);  
-  gfx->setTextSize(1);
-  gfx->setTextColor(C_DARK_GREEN); 
-  gfx->setCursor(usdX, 420);
-  gfx->print("$");
-
-  gfx->setFont(u8g2_font_helvB18_tr);
-  gfx->setTextColor(C_ACCENT);
-  gfx->setCursor(usdX + 35, 420); 
-  gfx->print("USD");
-  
-  gfx->setFont(u8g2_font_logisoso46_tn);  
-  gfx->setTextSize(1);
-  gfx->setTextColor(C_TEXT); 
-  gfx->setCursor(usdX, 500);
-  gfx->print(courseUSD, 4);
-
-  gfx->setFont(u8g2_font_helvB14_tr);
-  gfx->print(" PLN");
-  gfx->setFont((const GFXfont*)nullptr);
-
+  // USD
+  drawPrice(usdX, 500, courseUSD, 4);
   drawPercentLine(usdX, 535, "24h", change24USD);
   drawPercentLine(usdX, 575, "1 Month", change1MUSD);
-
   drawTrendArrow(usdCenterAxis - 25, 460, 50, dirUSD);
-  
   drawLiveChange(usdCenterAxis, 540, liveChangeUSD);
 }
 
-// NETWORK LOGIC
-void fetchAllData() {
-  if (WiFi.status() == WL_CONNECTED) {
-    WiFiClientSecure client;
-    client.setInsecure(); 
-    HTTPClient http;
-    
-    // 1. BTC
-    if (http.begin(client, "https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT")) {
-      if (http.GET() == 200) {
-        String payload = http.getString();
-        JsonDocument doc;
-        deserializeJson(doc, payload);
-        float nowy = doc["lastPrice"].as<float>();
-        change24BTC = doc["priceChangePercent"].as<float>();
-        
-        float monthlyOpen = getMonthlyOpen("BTCUSDT");
-        if (monthlyOpen > 0) {
-          change1MBTC = ((nowy - monthlyOpen) / monthlyOpen) * 100.0;
-        }
-        
-        if (oldBTC != 0) { 
-           if (nowy > oldBTC) dirBTC = 1; else if (nowy < oldBTC) dirBTC = -1; else dirBTC = 0;
-           liveChangeBTC = ((nowy - oldBTC) / oldBTC) * 100.0;
-        }
-        
-        oldBTC = nowy; courseBTC = nowy;
-        updateHistory(historyBTC, courseBTC);
-      }
-      http.end();
-    }
+// NETWORK TASK
+void NetworkTask(void * parameter) {
+  int loopCounter = 0; 
+  
+  for(;;) { 
+    if (WiFi.status() == WL_CONNECTED) {
+        WiFiClientSecure client;
+        client.setInsecure(); 
+        HTTPClient http;
+        http.setTimeout(4000); 
 
-    // 2. ETH
-    if (http.begin(client, "https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT")) {
-      if (http.GET() == 200) {
-        String payload = http.getString();
-        JsonDocument doc;
-        deserializeJson(doc, payload);
-        float nowy = doc["lastPrice"].as<float>();
-        change24ETH = doc["priceChangePercent"].as<float>();
+        bool update1M = (loopCounter == 0); 
         
-        float monthlyOpen = getMonthlyOpen("ETHUSDT");
-        if (monthlyOpen > 0) {
-          change1METH = ((nowy - monthlyOpen) / monthlyOpen) * 100.0;
+        // 1. BTC
+        if (http.begin(client, "https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT")) {
+            if (http.GET() == 200) {
+                String payload = http.getString();
+                JsonDocument doc;
+                deserializeJson(doc, payload);
+                float nowy = doc["lastPrice"].as<float>();
+                change24BTC = doc["priceChangePercent"].as<float>();
+                if (update1M) {
+                    float mOpen = getMonthlyOpen("BTCUSDT");
+                    if(mOpen > 0) change1MBTC = ((nowy - mOpen) / mOpen) * 100.0;
+                }
+                if (oldBTC != 0) { 
+                   if (nowy > oldBTC) dirBTC = 1; else if (nowy < oldBTC) dirBTC = -1; else dirBTC = 0;
+                   liveChangeBTC = ((nowy - oldBTC) / oldBTC) * 100.0;
+                }
+                oldBTC = nowy; courseBTC = nowy;
+                updateHistory(historyBTC, courseBTC);
+            }
+            http.end();
         }
-        
-        if (oldETH != 0) { 
-          if (nowy > oldETH) dirETH = 1; else if (nowy < oldETH) dirETH = -1; else dirETH = 0;
-          liveChangeETH = ((nowy - oldETH) / oldETH) * 100.0;
-        }
-        
-        oldETH = nowy; courseETH = nowy;
-        updateHistory(historyETH, courseETH);
-      }
-      http.end();
-    }
 
-    // 3. USD
-    float usdtPlnPrice = 0.0;
-    float usdtPlnChange = 0.0;
-    float usdtPlnOpenMonth = 0.0;
+        // 2. ETH
+        if (http.begin(client, "https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT")) {
+            if (http.GET() == 200) {
+                String payload = http.getString();
+                JsonDocument doc;
+                deserializeJson(doc, payload);
+                float nowy = doc["lastPrice"].as<float>();
+                change24ETH = doc["priceChangePercent"].as<float>();
+                if (update1M) {
+                    float mOpen = getMonthlyOpen("ETHUSDT");
+                    if(mOpen > 0) change1METH = ((nowy - mOpen) / mOpen) * 100.0;
+                }
+                if (oldETH != 0) { 
+                  if (nowy > oldETH) dirETH = 1; else if (nowy < oldETH) dirETH = -1; else dirETH = 0;
+                  liveChangeETH = ((nowy - oldETH) / oldETH) * 100.0;
+                }
+                oldETH = nowy; courseETH = nowy;
+                updateHistory(historyETH, courseETH);
+            }
+            http.end();
+        }
+        
+        float usdtPlnPrice = 0.0;
+        float usdtPlnChange = 0.0;
+        
+        // USD
+        if (http.begin(client, "https://api.binance.com/api/v3/ticker/24hr?symbol=USDTPLN")) {
+            if (http.GET() == 200) {
+                String payload = http.getString();
+                JsonDocument doc;
+                deserializeJson(doc, payload);
+                float nowy = doc["lastPrice"].as<float>();
+                usdtPlnPrice = nowy;
+                usdtPlnChange = doc["priceChangePercent"].as<float>();
+                change24USD = usdtPlnChange;
+                if (update1M) {
+                    float mOpen = getMonthlyOpen("USDTPLN");
+                    if(mOpen > 0) change1MUSD = ((nowy - mOpen) / mOpen) * 100.0;
+                }
+                if (oldUSD != 0) { 
+                  if (nowy > oldUSD) dirUSD = 1; else if (nowy < oldUSD) dirUSD = -1; else dirUSD = 0;
+                  liveChangeUSD = ((nowy - oldUSD) / oldUSD) * 100.0;
+                }
+                oldUSD = nowy; courseUSD = nowy;
+            }
+            http.end();
+        }
 
-    if (http.begin(client, "https://api.binance.com/api/v3/ticker/24hr?symbol=USDTPLN")) {
-      if (http.GET() == 200) {
-        String payload = http.getString();
-        JsonDocument doc;
-        deserializeJson(doc, payload);
-        float nowy = doc["lastPrice"].as<float>();
-        usdtPlnPrice = nowy;
-        usdtPlnChange = doc["priceChangePercent"].as<float>();
-        change24USD = usdtPlnChange;
-      
-        usdtPlnOpenMonth = getMonthlyOpen("USDTPLN");
-        if (usdtPlnOpenMonth > 0) {
-           change1MUSD = ((nowy - usdtPlnOpenMonth) / usdtPlnOpenMonth) * 100.0;
+        // EUR
+        if (http.begin(client, "https://api.binance.com/api/v3/ticker/24hr?symbol=EURUSDT")) {
+            if (http.GET() == 200) {
+                String payload = http.getString();
+                JsonDocument doc;
+                deserializeJson(doc, payload);
+                float eurUsdPrice = doc["lastPrice"].as<float>();
+                float eurUsdChange = doc["priceChangePercent"].as<float>();
+                
+                float calculatedEurPln = eurUsdPrice * usdtPlnPrice;
+                change24EUR = eurUsdChange + usdtPlnChange;
+                
+                if (update1M) {
+                      float mOpenEurUsd = getMonthlyOpen("EURUSDT");
+                      if(mOpenEurUsd > 0) {
+                          float changeEurUsdMonth = ((eurUsdPrice - mOpenEurUsd) / mOpenEurUsd) * 100.0;
+                          change1MEUR = changeEurUsdMonth + change1MUSD;
+                      }
+                }
+                if (oldEUR != 0) { 
+                  if (calculatedEurPln > oldEUR) dirEUR = 1; else if (calculatedEurPln < oldEUR) dirEUR = -1; else dirEUR = 0;
+                  liveChangeEUR = ((calculatedEurPln - oldEUR) / oldEUR) * 100.0;
+                }
+                oldEUR = calculatedEurPln; courseEUR = calculatedEurPln;
+            }
+            http.end();
         }
-        
-        if (oldUSD != 0) { 
-          if (nowy > oldUSD) dirUSD = 1; else if (nowy < oldUSD) dirUSD = -1; else dirUSD = 0;
-          liveChangeUSD = ((nowy - oldUSD) / oldUSD) * 100.0;
-        }
-        
-        oldUSD = nowy; courseUSD = nowy;
-      }
-      http.end();
-    }
 
-    // 4. EUR 
-    if (http.begin(client, "https://api.binance.com/api/v3/ticker/24hr?symbol=EURUSDT")) {
-      if (http.GET() == 200) {
-        String payload = http.getString();
-        JsonDocument doc;
-        deserializeJson(doc, payload);
-        float eurUsdPrice = doc["lastPrice"].as<float>();
-        float eurUsdChange = doc["priceChangePercent"].as<float>();
-        float calculatedEurPln = eurUsdPrice * usdtPlnPrice;
-        float calculatedChange = eurUsdChange + usdtPlnChange; 
-        change24EUR = calculatedChange;
+        dataReadyToDraw = true; 
         
-        float eurUsdOpenMonth = getMonthlyOpen("EURUSDT");
-        if (eurUsdOpenMonth > 0 && usdtPlnOpenMonth > 0) {
-           float eurPlnOpenMonth = eurUsdOpenMonth * usdtPlnOpenMonth;
-           change1MEUR = ((calculatedEurPln - eurPlnOpenMonth) / eurPlnOpenMonth) * 100.0;
-        }
-        
-        if (oldEUR != 0) { 
-          if (calculatedEurPln > oldEUR) dirEUR = 1; else if (calculatedEurPln < oldEUR) dirEUR = -1; else dirEUR = 0;
-          liveChangeEUR = ((calculatedEurPln - oldEUR) / oldEUR) * 100.0;
-        }
-        
-        oldEUR = calculatedEurPln; courseEUR = calculatedEurPln;
-      }
-      http.end();
+        loopCounter++;
+        if(loopCounter >= 20) loopCounter = 0; 
     }
-    
-    drawCryptoSection();
-    drawFiatSection();
+    vTaskDelay(15000 / portTICK_PERIOD_MS);
   }
 }
 
@@ -527,7 +491,17 @@ void setup() {
   gfx->fillScreen(C_BG);
   drawTopBarStatic();
   updateTopClock();
-  fetchAllData();
+  drawStaticInterface();
+
+  xTaskCreatePinnedToCore(
+    NetworkTask,   
+    "NetTask",     
+    10000,         
+    NULL,          
+    1,             
+    NULL,          
+    0              
+  );
 }
 
 void loop() {
@@ -538,8 +512,10 @@ void loop() {
     updateTopClock();
   }
 
-  if (currentMillis - lastUpdateData >= 15000) {
-    lastUpdateData = currentMillis;
-    fetchAllData();
+  if (dataReadyToDraw) {
+     refreshDynamicData();
+     dataReadyToDraw = false; 
   }
+  
+  delay(10);
 }
