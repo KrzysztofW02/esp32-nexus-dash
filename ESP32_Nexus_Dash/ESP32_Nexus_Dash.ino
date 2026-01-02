@@ -9,24 +9,24 @@
 #include <WiFiUdp.h>
 #include <WiFiClientSecure.h> 
 #include "secrets.h" 
+#include "WebInterface.h"
+#include "DashboardFinance.h"
+#include "DashboardUtility.h"
+
+// GLOBAL VARIABLES
+WebServer server(80);
+int currentDashboard = 0; // 0 = Finance
+bool needRedrawStatic = false; 
 
 // WIFI DATA 
 const char* ssid = WIFI_SSID;
 const char* password = WIFI_PASSWORD;
 
-// SYSTEM COLORS
-#define C_BG        0x0000 
-#define C_ACCENT    0x07FF 
-#define C_TEXT      0xFFFF 
-#define C_GRAY      0x4208 
-#define C_GREEN     0x07E0 
-#define C_RED       0xF800 
-#define C_BAR_BG    0x1021 
-#define C_BLACK     0x0000
-#define C_DARK_GREEN 0x03E0 
-
-#define C_BTC_YELLOW 0xF7E0 
-#define C_ETH_PURPLE 0x981F 
+IPAddress local_IP(192, 168, 1, 47);
+IPAddress gateway(192, 168, 1, 1);   
+IPAddress subnet(255, 255, 255, 0);
+IPAddress primaryDNS(8, 8, 8, 8);    
+IPAddress secondaryDNS(8, 8, 4, 4);
 
 // PINS 
 #define TFT_DE    5
@@ -65,8 +65,8 @@ Arduino_RGB_Display *gfx = new Arduino_RGB_Display(1024, 600, rgbpanel);
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", 3600, 60000); 
 
-// FINANCIAL VARIABLES
-volatile float courseBTC = 0.0; float oldBTC = 0.0; volatile float change24BTC = 0.0; volatile float change1MBTC = 0.0; volatile float liveChangeBTC = 0.0; volatile int dirBTC = 0;          
+// FINANCIAL VARIABLES 
+volatile float courseBTC = 0.0; float oldBTC = 0.0; volatile float change24BTC = 0.0; volatile float change1MBTC = 0.0; volatile float liveChangeBTC = 0.0; volatile int dirBTC = 0;           
 volatile float courseETH = 0.0; float oldETH = 0.0; volatile float change24ETH = 0.0; volatile float change1METH = 0.0; volatile float liveChangeETH = 0.0; volatile int dirETH = 0;
 volatile float courseUSD = 0.0; float oldUSD = 0.0; volatile float change24USD = 0.0; volatile float change1MUSD = 0.0; volatile float liveChangeUSD = 0.0; volatile int dirUSD = 0;
 volatile float courseEUR = 0.0; float oldEUR = 0.0; volatile float change24EUR = 0.0; volatile float change1MEUR = 0.0; volatile float liveChangeEUR = 0.0; volatile int dirEUR = 0;
@@ -82,9 +82,7 @@ unsigned long lastClockUpdate = 0;
 
 void updateHistory(float* history, float newPrice) {
   if (newPrice < 0.00001 || isnan(newPrice)) return;
-  
   for (int i = 0; i < GRAPH_POINTS - 1; i++) history[i] = history[i+1];
-  
   history[GRAPH_POINTS - 1] = newPrice;
 }
 
@@ -105,132 +103,6 @@ float getMonthlyOpen(const char* symbol) {
     http.end();
   }
   return openPrice;
-}
-
-// DRAWING HELPERS
-void cleanRect(int x, int y, int w, int h) {
-    gfx->fillRect(x, y, w, h, C_BG);
-}
-
-void drawSeparator(int y) {
-  gfx->fillRect(20, y, 984, 2, C_GRAY);
-}
-
-void drawTrendArrow(int x, int y, int size, int direction) {
-  cleanRect(x - 5, y - 5, size + 10, size + 10);
-  if (direction == 1) gfx->fillTriangle(x, y + size, x + (size/2), y, x + size, y + size, C_GREEN);
-  else if (direction == -1) gfx->fillTriangle(x, y, x + (size/2), y + size, x + size, y, C_RED);
-  else gfx->fillCircle(x + (size/2), y + (size/2), size/4, C_GRAY);
-}
-
-void drawPercentLine(int x, int y, String label, float percent) {
-  gfx->setFont(u8g2_font_helvB18_tr); 
-  gfx->setTextSize(1);
-  cleanRect(x, y - 20, 250, 25); 
-
-  String text = label + ": " + String(percent, 2) + "%";
-  if (percent > 0) text = label + ": +" + String(percent, 2) + "%";
-  
-  if (percent > 0) gfx->setTextColor(C_GREEN);
-  else if (percent < 0) gfx->setTextColor(C_RED);
-  else gfx->setTextColor(C_GRAY);
-
-  gfx->setCursor(x, y);
-  gfx->print(text);
-  gfx->setFont((const GFXfont*)nullptr);
-}
-
-void drawLiveChange(int centerX, int y, float diffPercent) {
-  gfx->setFont(u8g2_font_helvB18_tr); 
-  gfx->setTextSize(1);
-  cleanRect(centerX - 70, y - 25, 140, 30);
-
-  String text = "";
-  if (diffPercent > 0) text = "+" + String(diffPercent, 3) + "%";
-  else if (diffPercent < 0) text = String(diffPercent, 3) + "%";
-  else text = "0.000%"; 
-
-  int textWidth = text.length() * 11; 
-  int cursorX = centerX - (textWidth / 2);
-
-  if (diffPercent > 0) gfx->setTextColor(C_GREEN);
-  else if (diffPercent < 0) gfx->setTextColor(C_RED);
-  else gfx->setTextColor(C_GRAY);
-
-  gfx->setCursor(cursorX, y);
-  gfx->print(text);
-  gfx->setFont((const GFXfont*)nullptr);
-}
-
-void drawPrice(int x, int y, float price, int precision) {
-    gfx->setFont(u8g2_font_logisoso46_tn);  
-    gfx->setTextSize(1);
-    gfx->setTextColor(C_TEXT); 
-    cleanRect(x, y - 46, 300, 50);
-
-    gfx->setCursor(x, y);
-    gfx->print(price, precision);
-    gfx->setFont((const GFXfont*)nullptr);
-}
-void drawMountainChart(int x, int y, int w, int h, float* data, uint16_t color) {
-  cleanRect(x, y, w, h);
-
-  float minVal = 99999999.0;
-  float maxVal = -99999999.0;
-  bool hasData = false;
-
-  for(int i=0; i<GRAPH_POINTS; i++) {
-    if(data[i] > 0.0001) {
-       if(data[i] < minVal) minVal = data[i];
-       if(data[i] > maxVal) maxVal = data[i];
-       hasData = true;
-    }
-  }
-  
-  if (!hasData) return; 
-
-  float range = maxVal - minVal;
-  if (range < 0.0001) range = 1.0; 
-
-  int step = w / GRAPH_POINTS; 
-  
-  for (int i = 0; i < GRAPH_POINTS; i++) {
-    if (data[i] > 0.0001) {
-        float normalized = (data[i] - minVal) / range;
-        
-        if (maxVal - minVal < 0.0001) normalized = 0.5;
-
-        int barHeight = (int)(normalized * h);
-        if (barHeight < 2) barHeight = 2;
-        if (barHeight > h) barHeight = h;
-        
-        int xPos = x + (i * step);
-        int yPos = y + h - barHeight;
-        gfx->fillRect(xPos, yPos, step - 1, barHeight, color);
-    }
-  }
-}
-
-// ICONS
-void drawBTCLogo(int x, int y) {
-  gfx->fillCircle(x + 16, y + 16, 16, C_BTC_YELLOW);
-  gfx->setTextSize(3);
-  gfx->setTextColor(C_BLACK); 
-  gfx->setCursor(x + 10, y + 6);
-  gfx->print("B");
-}
-
-void drawETHLogo(int x, int y) {
-  gfx->fillTriangle(x + 16, y, x + 6, y + 18, x + 26, y + 18, C_ETH_PURPLE);
-  gfx->fillTriangle(x + 16, y + 32, x + 6, y + 20, x + 26, y + 20, C_ETH_PURPLE);
-}
-
-void drawEuroLogo(int x, int y) {
-  gfx->fillCircle(x + 18, y + 18, 18, C_BTC_YELLOW);
-  gfx->fillCircle(x + 22, y + 18, 14, C_BG);
-  gfx->fillRect(x + 22, y, 20, 36, C_BG);
-  gfx->fillRect(x + 2, y + 12, 24, 4, C_BTC_YELLOW);
-  gfx->fillRect(x + 2, y + 20, 24, 4, C_BTC_YELLOW);
 }
 
 // TOP BAR
@@ -262,81 +134,7 @@ void updateTopClock() {
   gfx->setFont((const GFXfont*)nullptr);
 }
 
-void drawStaticInterface() {
-    gfx->fillRect(0, 55, 1024, 300, C_BG);
-    gfx->fillRect(511, 70, 2, 270, C_GRAY);
-    gfx->fillRect(0, 360, 1024, 240, C_BG);
-    drawSeparator(360);
-    gfx->fillRect(511, 380, 2, 140, C_GRAY);
-
-    int btcX = 30; int ethX = 540;
-    int eurX = 50; int usdX = 550;
-
-    // BTC 
-    drawBTCLogo(btcX, 70);
-    gfx->setFont(u8g2_font_helvB18_tr); gfx->setTextSize(1); gfx->setTextColor(C_ACCENT); 
-    gfx->setCursor(btcX + 45, 100); gfx->print("BITCOIN");
-    gfx->setFont(u8g2_font_helvB14_tr); gfx->setCursor(btcX + 240, 180); gfx->print(" USD");
-
-    // ETH 
-    drawETHLogo(ethX, 70);
-    gfx->setFont(u8g2_font_helvB18_tr); gfx->setTextColor(C_ACCENT); 
-    gfx->setCursor(ethX + 45, 100); gfx->print("ETHEREUM");
-    gfx->setFont(u8g2_font_helvB14_tr); gfx->setCursor(ethX + 240, 180); gfx->print(" USD");
-
-    // EUR 
-    drawEuroLogo(eurX, 390);
-    gfx->setFont(u8g2_font_helvB18_tr); gfx->setTextColor(C_ACCENT);
-    gfx->setCursor(eurX + 45, 420); gfx->print("EURO"); 
-    gfx->setFont(u8g2_font_helvB14_tr); gfx->setCursor(eurX + 220, 500); gfx->print(" PLN");
-
-    // USD 
-    gfx->setFont(u8g2_font_logisoso32_tr); gfx->setTextColor(C_DARK_GREEN); gfx->setCursor(usdX, 420); gfx->print("$");
-    gfx->setFont(u8g2_font_helvB18_tr); gfx->setTextColor(C_ACCENT); gfx->setCursor(usdX + 35, 420); gfx->print("USD");
-    gfx->setFont(u8g2_font_helvB14_tr); gfx->setCursor(usdX + 220, 500); gfx->print(" PLN");
-    
-    gfx->setFont((const GFXfont*)nullptr);
-}
-
-// REFRESH DYNAMIC DATA
-void refreshDynamicData() {
-  int btcX = 30; int btcCenterAxis = 405; 
-  int ethX = 540; int ethCenterAxis = 915;
-  int eurX = 50; int eurCenterAxis = 405; 
-  int usdX = 550; int usdCenterAxis = 915;
-
-  // BTC
-  drawPrice(btcX, 180, courseBTC, 1);
-  drawPercentLine(btcX, 215, "24h", change24BTC);
-  drawPercentLine(btcX, 255, "1 Month", change1MBTC);
-  drawTrendArrow(btcCenterAxis - 25, 140, 50, dirBTC);
-  drawLiveChange(btcCenterAxis, 220, liveChangeBTC);
-  drawMountainChart(btcX, 275, 450, 60, historyBTC, C_ACCENT);
-
-  // ETH
-  drawPrice(ethX, 180, courseETH, 1);
-  drawPercentLine(ethX, 215, "24h", change24ETH);
-  drawPercentLine(ethX, 255, "1 Month", change1METH);
-  drawTrendArrow(ethCenterAxis - 25, 140, 50, dirETH);
-  drawLiveChange(ethCenterAxis, 220, liveChangeETH);
-  drawMountainChart(ethX, 275, 450, 60, historyETH, C_ACCENT);
-
-  // EUR
-  drawPrice(eurX, 500, courseEUR, 4);
-  drawPercentLine(eurX, 535, "24h", change24EUR);
-  drawPercentLine(eurX, 575, "1 Month", change1MEUR);
-  drawTrendArrow(eurCenterAxis - 25, 460, 50, dirEUR);
-  drawLiveChange(eurCenterAxis, 540, liveChangeEUR);
-
-  // USD
-  drawPrice(usdX, 500, courseUSD, 4);
-  drawPercentLine(usdX, 535, "24h", change24USD);
-  drawPercentLine(usdX, 575, "1 Month", change1MUSD);
-  drawTrendArrow(usdCenterAxis - 25, 460, 50, dirUSD);
-  drawLiveChange(usdCenterAxis, 540, liveChangeUSD);
-}
-
-// NETWORK TASK
+// NETWORK TASK 
 void NetworkTask(void * parameter) {
   int loopCounter = 0; 
   
@@ -349,7 +147,7 @@ void NetworkTask(void * parameter) {
 
         bool update1M = (loopCounter == 0); 
         
-        // 1. BTC
+        // BTC
         if (http.begin(client, "https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT")) {
             if (http.GET() == 200) {
                 String payload = http.getString();
@@ -371,7 +169,7 @@ void NetworkTask(void * parameter) {
             http.end();
         }
 
-        // 2. ETH
+        // ETH
         if (http.begin(client, "https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT")) {
             if (http.GET() == 200) {
                 String payload = http.getString();
@@ -478,12 +276,22 @@ void setup() {
   gfx->setTextColor(C_ACCENT);
   gfx->setCursor(350, 300);
   gfx->print("SYSTEM BOOT...");
-   
+  
+  if (!WiFi.config(local_IP, gateway, subnet, primaryDNS, secondaryDNS)) {
+    Serial.println("STA Failed to configure");
+  }
+
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
       delay(500);
       gfx->print(".");
   }
+
+  // WEB SERVER START
+  server.on("/", handleRoot);
+  server.on("/set", handleSet);
+  server.begin();
+  Serial.println("Web server started");
 
   timeClient.begin();
   timeClient.update();
@@ -491,7 +299,10 @@ void setup() {
   gfx->fillScreen(C_BG);
   drawTopBarStatic();
   updateTopClock();
-  drawStaticInterface();
+  
+  if (currentDashboard == 0) {
+    drawStaticInterfaceFinance();
+  }
 
   xTaskCreatePinnedToCore(
     NetworkTask,   
@@ -506,15 +317,33 @@ void setup() {
 
 void loop() {
   unsigned long currentMillis = millis();
+  server.handleClient();
 
+  // DASHBOARD SWITCHING
+  if (needRedrawStatic) {
+     gfx->fillScreen(C_BG);
+     drawTopBarStatic(); 
+     updateTopClock();
+     
+     if (currentDashboard == 0) {
+        drawStaticInterfaceFinance();
+        dataReadyToDraw = true; 
+     } else if (currentDashboard == 1) {
+        drawUtilityInterface(gfx, WiFi.localIP());
+     }
+     needRedrawStatic = false;
+  }
+
+  // CLOCK UPDATE
   if (currentMillis - lastClockUpdate >= 1000) {
     lastClockUpdate = currentMillis;
     updateTopClock();
   }
 
-  if (dataReadyToDraw) {
-     refreshDynamicData();
-     dataReadyToDraw = false; 
+  // DYNAMIC DATA REFRESH
+  if (currentDashboard == 0 && dataReadyToDraw) {
+      refreshDynamicDataFinance();
+      dataReadyToDraw = false; 
   }
   
   delay(10);
