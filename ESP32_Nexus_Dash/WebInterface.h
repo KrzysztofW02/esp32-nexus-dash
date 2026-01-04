@@ -2,10 +2,26 @@
 #define WEBINTERFACE_H
 
 #include <WebServer.h>
+#include "DashboardPC.h" 
 
 extern WebServer server;
 extern int currentDashboard;
 extern bool needRedrawStatic;
+extern bool dataReadyToDraw;
+
+void handleUpdatePC() {
+    if (server.hasArg("plain")) {
+        String body = server.arg("plain");
+        handlePCJson(body);
+        
+        if (currentDashboard == 1) {
+            dataReadyToDraw = true; 
+        }
+        server.send(200, "text/plain", "OK");
+    } else {
+        server.send(400, "text/plain", "No Data");
+    }
+}
 
 void handleRoot() {
   String html = "<!DOCTYPE html><html lang='en'><head>";
@@ -39,9 +55,9 @@ void handleRoot() {
   
   // Card 2
   html += "<a href='/set?mode=1' class='card " + String(currentDashboard == 1 ? "active" : "") + "'>";
-  html += "<span class='icon'>🛠️</span>";
-  html += "<span class='btn-title'>Utility Dashboard</span>";
-  html += "<span class='btn-desc'>(In Construction).</span>";
+  html += "<span class='icon'>🖥️</span>";
+  html += "<span class='btn-title'>PC Monitor</span>"; 
+  html += "<span class='btn-desc'>Real-time CPU, GPU, RAM & Network stats.</span>"; 
   html += "</a>";
   
   html += "</div></body></html>";

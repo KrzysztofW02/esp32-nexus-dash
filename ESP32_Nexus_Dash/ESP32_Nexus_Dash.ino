@@ -11,11 +11,11 @@
 #include "secrets.h" 
 #include "WebInterface.h"
 #include "DashboardFinance.h"
-#include "DashboardUtility.h"
+#include "DashboardPC.h" 
 
 // GLOBAL VARIABLES
 WebServer server(80);
-int currentDashboard = 0; // 0 = Finance
+int currentDashboard = 0; // 0 = Finance, 1 = PC Monitor
 bool needRedrawStatic = false; 
 
 // WIFI DATA 
@@ -139,7 +139,7 @@ void NetworkTask(void * parameter) {
   int loopCounter = 0; 
   
   for(;;) { 
-    if (WiFi.status() == WL_CONNECTED) {
+    if (WiFi.status() == WL_CONNECTED && currentDashboard == 0) {
         WiFiClientSecure client;
         client.setInsecure(); 
         HTTPClient http;
@@ -250,7 +250,7 @@ void NetworkTask(void * parameter) {
         loopCounter++;
         if(loopCounter >= 20) loopCounter = 0; 
     }
-    vTaskDelay(15000 / portTICK_PERIOD_MS);
+    vTaskDelay(10000 / portTICK_PERIOD_MS);
   }
 }
 
@@ -290,6 +290,9 @@ void setup() {
   // WEB SERVER START
   server.on("/", handleRoot);
   server.on("/set", handleSet);
+  // Rejestracja endpointu PC (funkcja jest w WebInterface.h)
+  server.on("/update_pc", HTTP_POST, handleUpdatePC);
+  
   server.begin();
   Serial.println("Web server started");
 
@@ -321,17 +324,17 @@ void loop() {
 
   // DASHBOARD SWITCHING
   if (needRedrawStatic) {
-     gfx->fillScreen(C_BG);
-     drawTopBarStatic(); 
-     updateTopClock();
-     
-     if (currentDashboard == 0) {
+      gfx->fillScreen(C_BG);
+      drawTopBarStatic(); 
+      updateTopClock();
+      
+      if (currentDashboard == 0) {
         drawStaticInterfaceFinance();
         dataReadyToDraw = true; 
-     } else if (currentDashboard == 1) {
-        drawUtilityInterface(gfx, WiFi.localIP());
-     }
-     needRedrawStatic = false;
+      } else if (currentDashboard == 1) {
+        drawStaticInterfacePC(gfx);
+      }
+      needRedrawStatic = false;
   }
 
   // CLOCK UPDATE
@@ -341,8 +344,15 @@ void loop() {
   }
 
   // DYNAMIC DATA REFRESH
+  // Dashboard 0: Finance
   if (currentDashboard == 0 && dataReadyToDraw) {
       refreshDynamicDataFinance();
+      dataReadyToDraw = false; 
+  }
+  
+  // Dashboard 1: PC Monitor
+  if (currentDashboard == 1 && dataReadyToDraw) {
+      refreshDynamicDataPC(gfx);
       dataReadyToDraw = false; 
   }
   
