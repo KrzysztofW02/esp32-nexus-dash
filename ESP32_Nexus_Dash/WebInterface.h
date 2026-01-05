@@ -10,13 +10,15 @@ extern bool needRedrawStatic;
 extern bool dataReadyToDraw;
 
 void handleUpdatePC() {
+    if (currentDashboard != 1) {
+        server.send(200, "text/plain", "Ignored - Dashboard inactive");
+        return; 
+    }
+
     if (server.hasArg("plain")) {
         String body = server.arg("plain");
         handlePCJson(body);
-        
-        if (currentDashboard == 1) {
-            dataReadyToDraw = true; 
-        }
+        dataReadyToDraw = true; 
         server.send(200, "text/plain", "OK");
     } else {
         server.send(400, "text/plain", "No Data");

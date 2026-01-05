@@ -23,12 +23,12 @@ const char* ssid = WIFI_SSID;
 const char* password = WIFI_PASSWORD;
 
 IPAddress local_IP(192, 168, 1, 47);
-IPAddress gateway(192, 168, 1, 1);   
+IPAddress gateway(192, 168, 1, 1);    
 IPAddress subnet(255, 255, 255, 0);
 IPAddress primaryDNS(8, 8, 8, 8);    
 IPAddress secondaryDNS(8, 8, 4, 4);
 
-// PINS 
+// PINS
 #define TFT_DE    5
 #define TFT_VSYNC 3
 #define TFT_HSYNC 46
@@ -134,123 +134,136 @@ void updateTopClock() {
   gfx->setFont((const GFXfont*)nullptr);
 }
 
-// NETWORK TASK 
+// NETWORK TASK
 void NetworkTask(void * parameter) {
   int loopCounter = 0; 
   
   for(;;) { 
-    if (WiFi.status() == WL_CONNECTED && currentDashboard == 0) {
-        WiFiClientSecure client;
-        client.setInsecure(); 
-        HTTPClient http;
-        http.setTimeout(4000); 
+    switch (currentDashboard) {
+      // CASE 0: FINANCE DASHBOARD
+        case 0:
+            if (WiFi.status() == WL_CONNECTED) {
+                WiFiClientSecure client;
+                client.setInsecure(); 
+                HTTPClient http;
+                http.setTimeout(4000); 
 
-        bool update1M = (loopCounter == 0); 
-        
-        // BTC
-        if (http.begin(client, "https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT")) {
-            if (http.GET() == 200) {
-                String payload = http.getString();
-                JsonDocument doc;
-                deserializeJson(doc, payload);
-                float nowy = doc["lastPrice"].as<float>();
-                change24BTC = doc["priceChangePercent"].as<float>();
-                if (update1M) {
-                    float mOpen = getMonthlyOpen("BTCUSDT");
-                    if(mOpen > 0) change1MBTC = ((nowy - mOpen) / mOpen) * 100.0;
-                }
-                if (oldBTC != 0) { 
-                   if (nowy > oldBTC) dirBTC = 1; else if (nowy < oldBTC) dirBTC = -1; else dirBTC = 0;
-                   liveChangeBTC = ((nowy - oldBTC) / oldBTC) * 100.0;
-                }
-                oldBTC = nowy; courseBTC = nowy;
-                updateHistory(historyBTC, courseBTC);
-            }
-            http.end();
-        }
-
-        // ETH
-        if (http.begin(client, "https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT")) {
-            if (http.GET() == 200) {
-                String payload = http.getString();
-                JsonDocument doc;
-                deserializeJson(doc, payload);
-                float nowy = doc["lastPrice"].as<float>();
-                change24ETH = doc["priceChangePercent"].as<float>();
-                if (update1M) {
-                    float mOpen = getMonthlyOpen("ETHUSDT");
-                    if(mOpen > 0) change1METH = ((nowy - mOpen) / mOpen) * 100.0;
-                }
-                if (oldETH != 0) { 
-                  if (nowy > oldETH) dirETH = 1; else if (nowy < oldETH) dirETH = -1; else dirETH = 0;
-                  liveChangeETH = ((nowy - oldETH) / oldETH) * 100.0;
-                }
-                oldETH = nowy; courseETH = nowy;
-                updateHistory(historyETH, courseETH);
-            }
-            http.end();
-        }
-        
-        float usdtPlnPrice = 0.0;
-        float usdtPlnChange = 0.0;
-        
-        // USD
-        if (http.begin(client, "https://api.binance.com/api/v3/ticker/24hr?symbol=USDTPLN")) {
-            if (http.GET() == 200) {
-                String payload = http.getString();
-                JsonDocument doc;
-                deserializeJson(doc, payload);
-                float nowy = doc["lastPrice"].as<float>();
-                usdtPlnPrice = nowy;
-                usdtPlnChange = doc["priceChangePercent"].as<float>();
-                change24USD = usdtPlnChange;
-                if (update1M) {
-                    float mOpen = getMonthlyOpen("USDTPLN");
-                    if(mOpen > 0) change1MUSD = ((nowy - mOpen) / mOpen) * 100.0;
-                }
-                if (oldUSD != 0) { 
-                  if (nowy > oldUSD) dirUSD = 1; else if (nowy < oldUSD) dirUSD = -1; else dirUSD = 0;
-                  liveChangeUSD = ((nowy - oldUSD) / oldUSD) * 100.0;
-                }
-                oldUSD = nowy; courseUSD = nowy;
-            }
-            http.end();
-        }
-
-        // EUR
-        if (http.begin(client, "https://api.binance.com/api/v3/ticker/24hr?symbol=EURUSDT")) {
-            if (http.GET() == 200) {
-                String payload = http.getString();
-                JsonDocument doc;
-                deserializeJson(doc, payload);
-                float eurUsdPrice = doc["lastPrice"].as<float>();
-                float eurUsdChange = doc["priceChangePercent"].as<float>();
+                bool update1M = (loopCounter == 0); 
                 
-                float calculatedEurPln = eurUsdPrice * usdtPlnPrice;
-                change24EUR = eurUsdChange + usdtPlnChange;
-                
-                if (update1M) {
-                      float mOpenEurUsd = getMonthlyOpen("EURUSDT");
-                      if(mOpenEurUsd > 0) {
-                          float changeEurUsdMonth = ((eurUsdPrice - mOpenEurUsd) / mOpenEurUsd) * 100.0;
-                          change1MEUR = changeEurUsdMonth + change1MUSD;
-                      }
+                // BTC
+                if (http.begin(client, "https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT")) {
+                    if (http.GET() == 200) {
+                        String payload = http.getString();
+                        JsonDocument doc;
+                        deserializeJson(doc, payload);
+                        float nowy = doc["lastPrice"].as<float>();
+                        change24BTC = doc["priceChangePercent"].as<float>();
+                        if (update1M) {
+                            float mOpen = getMonthlyOpen("BTCUSDT");
+                            if(mOpen > 0) change1MBTC = ((nowy - mOpen) / mOpen) * 100.0;
+                        }
+                        if (oldBTC != 0) { 
+                           if (nowy > oldBTC) dirBTC = 1; else if (nowy < oldBTC) dirBTC = -1; else dirBTC = 0;
+                           liveChangeBTC = ((nowy - oldBTC) / oldBTC) * 100.0;
+                        }
+                        oldBTC = nowy; courseBTC = nowy;
+                        updateHistory(historyBTC, courseBTC);
+                    }
+                    http.end();
                 }
-                if (oldEUR != 0) { 
-                  if (calculatedEurPln > oldEUR) dirEUR = 1; else if (calculatedEurPln < oldEUR) dirEUR = -1; else dirEUR = 0;
-                  liveChangeEUR = ((calculatedEurPln - oldEUR) / oldEUR) * 100.0;
-                }
-                oldEUR = calculatedEurPln; courseEUR = calculatedEurPln;
-            }
-            http.end();
-        }
 
-        dataReadyToDraw = true; 
-        
-        loopCounter++;
-        if(loopCounter >= 20) loopCounter = 0; 
+                // ETH
+                if (http.begin(client, "https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT")) {
+                    if (http.GET() == 200) {
+                        String payload = http.getString();
+                        JsonDocument doc;
+                        deserializeJson(doc, payload);
+                        float nowy = doc["lastPrice"].as<float>();
+                        change24ETH = doc["priceChangePercent"].as<float>();
+                        if (update1M) {
+                            float mOpen = getMonthlyOpen("ETHUSDT");
+                            if(mOpen > 0) change1METH = ((nowy - mOpen) / mOpen) * 100.0;
+                        }
+                        if (oldETH != 0) { 
+                          if (nowy > oldETH) dirETH = 1; else if (nowy < oldETH) dirETH = -1; else dirETH = 0;
+                          liveChangeETH = ((nowy - oldETH) / oldETH) * 100.0;
+                        }
+                        oldETH = nowy; courseETH = nowy;
+                        updateHistory(historyETH, courseETH);
+                    }
+                    http.end();
+                }
+                
+                float usdtPlnPrice = 0.0;
+                float usdtPlnChange = 0.0;
+                
+                // USD
+                if (http.begin(client, "https://api.binance.com/api/v3/ticker/24hr?symbol=USDTPLN")) {
+                    if (http.GET() == 200) {
+                        String payload = http.getString();
+                        JsonDocument doc;
+                        deserializeJson(doc, payload);
+                        float nowy = doc["lastPrice"].as<float>();
+                        usdtPlnPrice = nowy;
+                        usdtPlnChange = doc["priceChangePercent"].as<float>();
+                        change24USD = usdtPlnChange;
+                        if (update1M) {
+                            float mOpen = getMonthlyOpen("USDTPLN");
+                            if(mOpen > 0) change1MUSD = ((nowy - mOpen) / mOpen) * 100.0;
+                        }
+                        if (oldUSD != 0) { 
+                          if (nowy > oldUSD) dirUSD = 1; else if (nowy < oldUSD) dirUSD = -1; else dirUSD = 0;
+                          liveChangeUSD = ((nowy - oldUSD) / oldUSD) * 100.0;
+                        }
+                        oldUSD = nowy; courseUSD = nowy;
+                    }
+                    http.end();
+                }
+
+                // EUR
+                if (http.begin(client, "https://api.binance.com/api/v3/ticker/24hr?symbol=EURUSDT")) {
+                    if (http.GET() == 200) {
+                        String payload = http.getString();
+                        JsonDocument doc;
+                        deserializeJson(doc, payload);
+                        float eurUsdPrice = doc["lastPrice"].as<float>();
+                        float eurUsdChange = doc["priceChangePercent"].as<float>();
+                        
+                        float calculatedEurPln = eurUsdPrice * usdtPlnPrice;
+                        change24EUR = eurUsdChange + usdtPlnChange;
+                        
+                        if (update1M) {
+                              float mOpenEurUsd = getMonthlyOpen("EURUSDT");
+                              if(mOpenEurUsd > 0) {
+                                  float changeEurUsdMonth = ((eurUsdPrice - mOpenEurUsd) / mOpenEurUsd) * 100.0;
+                                  change1MEUR = changeEurUsdMonth + change1MUSD;
+                              }
+                        }
+                        if (oldEUR != 0) { 
+                          if (calculatedEurPln > oldEUR) dirEUR = 1; else if (calculatedEurPln < oldEUR) dirEUR = -1; else dirEUR = 0;
+                          liveChangeEUR = ((calculatedEurPln - oldEUR) / oldEUR) * 100.0;
+                        }
+                        oldEUR = calculatedEurPln; courseEUR = calculatedEurPln;
+                    }
+                    http.end();
+                }
+
+                dataReadyToDraw = true; 
+                
+                loopCounter++;
+                if(loopCounter >= 20) loopCounter = 0; 
+            }
+            vTaskDelay(10000 / portTICK_PERIOD_MS);
+            break;
+
+        // CASE 1: PC MONITOR
+        case 1:
+            vTaskDelay(1000 / portTICK_PERIOD_MS); 
+            break;
+        default:
+            vTaskDelay(1000 / portTICK_PERIOD_MS);
+            break;
     }
-    vTaskDelay(10000 / portTICK_PERIOD_MS);
   }
 }
 
@@ -324,13 +337,14 @@ void loop() {
 
   // DASHBOARD SWITCHING
   if (needRedrawStatic) {
+      dataReadyToDraw = false; 
+      
       gfx->fillScreen(C_BG);
       drawTopBarStatic(); 
       updateTopClock();
       
       if (currentDashboard == 0) {
         drawStaticInterfaceFinance();
-        dataReadyToDraw = true; 
       } else if (currentDashboard == 1) {
         drawStaticInterfacePC(gfx);
       }
