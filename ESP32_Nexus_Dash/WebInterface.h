@@ -61,6 +61,13 @@ void handleRoot() {
   html += "<span class='btn-title'>PC Monitor</span>"; 
   html += "<span class='btn-desc'>Real-time CPU, GPU, RAM & Network stats.</span>"; 
   html += "</a>";
+
+  // Card 3
+  html += "<a href='/set?mode=2' class='card " + String(currentDashboard == 2 ? "active" : "") + "'>";
+  html += "<span class='icon'>📹</span>"; 
+  html += "<span class='btn-title'>Camera</span>"; 
+  html += "<span class='btn-desc'>Live view from the driveway.</span>"; 
+  html += "</a>";
   
   html += "</div></body></html>";
   server.send(200, "text/html", html);

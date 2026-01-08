@@ -12,10 +12,11 @@
 #include "WebInterface.h"
 #include "DashboardFinance.h"
 #include "DashboardPC.h" 
+#include "DashboardCamera.h"
 
 // GLOBAL VARIABLES
 WebServer server(80);
-int currentDashboard = 0; // 0 = Finance, 1 = PC Monitor
+int currentDashboard = 0; // 0 = Finance, 1 = PC Monitor, 2 = Camera
 bool needRedrawStatic = false; 
 
 // WIFI DATA 
@@ -260,6 +261,12 @@ void NetworkTask(void * parameter) {
         case 1:
             vTaskDelay(1000 / portTICK_PERIOD_MS); 
             break;
+            
+        // CASE 2: CAMERA
+        case 2:
+            vTaskDelay(1000 / portTICK_PERIOD_MS);
+            break;
+            
         default:
             vTaskDelay(1000 / portTICK_PERIOD_MS);
             break;
@@ -283,6 +290,9 @@ void setup() {
    }
 
   gfx->begin();
+  
+  setupCameraDashboard();
+  
   gfx->fillScreen(C_BG);
 
   gfx->setTextSize(3);
@@ -299,11 +309,12 @@ void setup() {
       delay(500);
       gfx->print(".");
   }
+  
+  WiFi.setSleep(false);
 
   // WEB SERVER START
   server.on("/", handleRoot);
   server.on("/set", handleSet);
-  // Rejestracja endpointu PC (funkcja jest w WebInterface.h)
   server.on("/update_pc", HTTP_POST, handleUpdatePC);
   
   server.begin();
@@ -340,24 +351,32 @@ void loop() {
       dataReadyToDraw = false; 
       
       gfx->fillScreen(C_BG);
-      drawTopBarStatic(); 
-      updateTopClock();
+
+      if (currentDashboard != 2) {
+          drawTopBarStatic(); 
+          updateTopClock();
+      }
       
       if (currentDashboard == 0) {
         drawStaticInterfaceFinance();
       } else if (currentDashboard == 1) {
         drawStaticInterfacePC(gfx);
+      } else if (currentDashboard == 2) { 
+        drawStaticInterfaceCamera();
       }
       needRedrawStatic = false;
   }
 
   // CLOCK UPDATE
-  if (currentMillis - lastClockUpdate >= 1000) {
-    lastClockUpdate = currentMillis;
-    updateTopClock();
+  if (currentDashboard != 2) {
+      if (currentMillis - lastClockUpdate >= 1000) {
+        lastClockUpdate = currentMillis;
+        updateTopClock();
+      }
   }
 
   // DYNAMIC DATA REFRESH
+  
   // Dashboard 0: Finance
   if (currentDashboard == 0 && dataReadyToDraw) {
       refreshDynamicDataFinance();
@@ -369,6 +388,11 @@ void loop() {
       refreshDynamicDataPC(gfx);
       dataReadyToDraw = false; 
   }
-  
-  delay(10);
+
+  // Dashboard 2: Camera
+  if (currentDashboard == 2) {
+    refreshCameraFrame();
+  } else {
+    delay(10);
+  }
 }
