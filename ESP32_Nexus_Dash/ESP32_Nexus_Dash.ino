@@ -9,14 +9,15 @@
 #include <WiFiUdp.h>
 #include <WiFiClientSecure.h> 
 #include "secrets.h" 
-#include "WebInterface.h"
 #include "DashboardFinance.h"
 #include "DashboardPC.h" 
 #include "DashboardCamera.h"
+#include "DashboardCloudflare.h"
+#include "WebInterface.h"
 
 // GLOBAL VARIABLES
 WebServer server(80);
-int currentDashboard = 0; // 0 = Finance, 1 = PC Monitor, 2 = Camera
+int currentDashboard = 0; // 0 = Finance, 1 = PC Monitor, 2 = Camera, 3 = Cloudflare Analytics
 bool needRedrawStatic = false; 
 
 // WIFI DATA 
@@ -316,6 +317,7 @@ void setup() {
   server.on("/", handleRoot);
   server.on("/set", handleSet);
   server.on("/update_pc", HTTP_POST, handleUpdatePC);
+  server.on("/update_cloudflare", HTTP_POST, handleUpdateCloudflare);
   
   server.begin();
   Serial.println("Web server started");
@@ -352,7 +354,7 @@ void loop() {
       
       gfx->fillScreen(C_BG);
 
-      if (currentDashboard != 2) {
+      if (currentDashboard != 2 && currentDashboard != 3) {
           drawTopBarStatic(); 
           updateTopClock();
       }
@@ -363,12 +365,14 @@ void loop() {
         drawStaticInterfacePC(gfx);
       } else if (currentDashboard == 2) { 
         drawStaticInterfaceCamera();
+      } else if (currentDashboard == 3) {
+        drawStaticInterfaceCloudflare();
       }
       needRedrawStatic = false;
   }
 
   // CLOCK UPDATE
-  if (currentDashboard != 2) {
+  if (currentDashboard != 2 && currentDashboard != 3) {
       if (currentMillis - lastClockUpdate >= 1000) {
         lastClockUpdate = currentMillis;
         updateTopClock();
@@ -392,6 +396,10 @@ void loop() {
   // Dashboard 2: Camera
   if (currentDashboard == 2) {
     refreshCameraFrame();
+  } 
+  // Dashboard 3: Cloudflare Security
+  else if (currentDashboard == 3) {
+    refreshDynamicDataCloudflare();
   } else {
     delay(10);
   }

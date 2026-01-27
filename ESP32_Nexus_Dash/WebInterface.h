@@ -3,6 +3,7 @@
 
 #include <WebServer.h>
 #include "DashboardPC.h" 
+#include "DashboardCloudflare.h"
 
 extern WebServer server;
 extern int currentDashboard;
@@ -19,6 +20,21 @@ void handleUpdatePC() {
         String body = server.arg("plain");
         handlePCJson(body);
         dataReadyToDraw = true; 
+        server.send(200, "text/plain", "OK");
+    } else {
+        server.send(400, "text/plain", "No Data");
+    }
+}
+
+void handleUpdateCloudflare() {
+    if (currentDashboard != 3) {
+        server.send(200, "text/plain", "Ignored - Dashboard inactive");
+        return; 
+    }
+
+    if (server.hasArg("plain")) {
+        String body = server.arg("plain");
+        handleCloudflareJson(body);
         server.send(200, "text/plain", "OK");
     } else {
         server.send(400, "text/plain", "No Data");
@@ -67,6 +83,13 @@ void handleRoot() {
   html += "<span class='icon'>📹</span>"; 
   html += "<span class='btn-title'>Camera</span>"; 
   html += "<span class='btn-desc'>Live view from the driveway.</span>"; 
+  html += "</a>";
+
+  // Card 4 - Cloudflare Security
+  html += "<a href='/set?mode=3' class='card " + String(currentDashboard == 3 ? "active" : "") + "'>";
+  html += "<span class='icon'>🛡️</span>"; 
+  html += "<span class='btn-title'>Cloudflare Security</span>"; 
+  html += "<span class='btn-desc'>Live security events, threats & analytics from your domain.</span>"; 
   html += "</a>";
   
   html += "</div></body></html>";
