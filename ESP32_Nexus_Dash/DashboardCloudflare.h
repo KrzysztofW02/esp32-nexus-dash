@@ -44,12 +44,12 @@ volatile int cfFirewall = 0;
 char cfCountryCodes[CF_MAX_COUNTRIES][4] = {"", "", "", "", ""};
 int cfCountryCounts[CF_MAX_COUNTRIES] = {0, 0, 0, 0, 0};
 
-#define CF_MAX_EVENTS 10
-char cfEventType[CF_MAX_EVENTS][12] = {"", "", "", "", "", "", "", "", "", ""};
-char cfEventCountry[CF_MAX_EVENTS][4] = {"", "", "", "", "", "", "", "", "", ""};
-char cfEventAction[CF_MAX_EVENTS][24] = {"", "", "", "", "", "", "", "", "", ""};
-char cfEventTime[CF_MAX_EVENTS][10] = {"", "", "", "", "", "", "", "", "", ""};
-bool cfEventActive[CF_MAX_EVENTS] = {false, false, false, false, false, false, false, false, false, false};
+#define CF_MAX_EVENTS 8
+char cfEventType[CF_MAX_EVENTS][12] = {"", "", "", "", "", "", "", ""};
+char cfEventCountry[CF_MAX_EVENTS][4] = {"", "", "", "", "", "", "", ""};
+char cfEventAction[CF_MAX_EVENTS][24] = {"", "", "", "", "", "", "", ""};
+char cfEventTime[CF_MAX_EVENTS][10] = {"", "", "", "", "", "", "", ""};
+bool cfEventActive[CF_MAX_EVENTS] = {false, false, false, false, false, false, false, false};
 
 bool cfDataReady = false;
 unsigned long cfLastUpdate = 0;
@@ -174,35 +174,35 @@ void drawStatCard(int x, int y, int w, const char* label, unsigned long value, u
 void drawEventRow(int x, int y, int index) {
     if (index < 0 || index >= CF_MAX_EVENTS || !cfEventActive[index]) return;
     
-    int rowH = 48;
+    int rowH = 60;  
     
     gfx->fillRect(x, y, 590, rowH, CF_PANEL);
     
     uint16_t typeColor = getTypeColor(cfEventType[index]);
-    gfx->fillRect(x, y, 4, rowH, typeColor);
+    gfx->fillRect(x, y, 5, rowH, typeColor); 
     
     // Time
-    gfx->setFont(u8g2_font_helvB10_tr);
+    gfx->setFont(u8g2_font_helvB12_tr);
     gfx->setTextColor(CF_DARK_GRAY);
-    gfx->setCursor(x + 15, y + 20);
+    gfx->setCursor(x + 18, y + 28);
     gfx->print(cfEventTime[index]);
     
     // Type
-    gfx->setFont(u8g2_font_helvB12_tr);
+    gfx->setFont(u8g2_font_helvB14_tr);
     gfx->setTextColor(typeColor);
-    gfx->setCursor(x + 100, y + 20);
+    gfx->setCursor(x + 105, y + 28);
     gfx->print(cfEventType[index]);
     
     // Country
     gfx->setTextColor(CF_WHITE);
-    gfx->setCursor(x + 200, y + 20);
+    gfx->setCursor(x + 210, y + 28);
     gfx->print(getCountryName(cfEventCountry[index]));
     
     // Action
     uint16_t actionColor = getActionColor(cfEventAction[index]);
-    gfx->setFont(u8g2_font_helvB10_tr);
+    gfx->setFont(u8g2_font_helvB12_tr);
     gfx->setTextColor(actionColor);
-    gfx->setCursor(x + 345, y + 20);
+    gfx->setCursor(x + 360, y + 28);
     gfx->print(getActionName(cfEventAction[index]));
     
     gfx->drawFastHLine(x + 10, y + rowH - 1, 570, CF_BORDER);
@@ -521,7 +521,7 @@ void refreshDynamicDataCloudflare() {
     for (int i = 0; i < CF_MAX_EVENTS; i++) {
         if (cfEventActive[i]) {
             drawEventRow(15, eventY, i);
-            eventY += 49;
+            eventY += 61;
         }
     }
     yield();
