@@ -12,20 +12,30 @@ import time
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 
+from PIL import Image
+import pystray
+from pystray import MenuItem as item
+
 import psutil
 import requests
 import cv2
 import subprocess
 import re
+import html
+import unicodedata
 from flask import Flask, Response
 import logging
 
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
 os.environ['WERKZEUG_RUN_MAIN'] = 'true'
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
-# ===================== CONFIGURATION =====================
-# Load from environment variables or use defaults
+
 ESP32_IP = os.getenv('ESP32_IP', '192.168.1.47')
 
 # Camera settings
@@ -39,15 +49,24 @@ CF_API_TOKEN = os.getenv('CF_API_TOKEN', '')
 CF_ZONE_ID = os.getenv('CF_ZONE_ID', '')
 CF_GRAPHQL_URL = 'https://api.cloudflare.com/client/v4/graphql'
 
+# YouTube API
+YT_API_KEY = os.getenv('YOUTUBE_API_KEY', '')
+YT_CHANNEL_ID = os.getenv('YOUTUBE_CHANNEL_ID', '')
+YT_API_BASE = 'https://www.googleapis.com/youtube/v3'
+
 
 # --- GUI SETTINGS ---
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
-if getattr(sys, 'frozen', False):
-    SCRIPT_DIR = os.path.dirname(sys.executable)
-else:
-    SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+def get_resource_path(relative_path):
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_path, relative_path)
+
+SCRIPT_DIR = get_resource_path("")
 
 
 class ServiceState(Enum):
@@ -446,6 +465,182 @@ class CloudflareProxyService(BaseService):
             if self._sleep(30):
                 break
 
+def sanitize_for_display(text):
+    text = re.sub(r'<[^>]+>', '', text)
+    text = html.unescape(text)
+    text = text.replace('\u0142', 'l').replace('\u0141', 'L')  # ł/Ł
+    text = unicodedata.normalize('NFKD', text)
+    text = text.encode('ascii', 'ignore').decode('ascii')
+    text = text.replace('\n', ' ').replace('\r', '')
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
+
+class YouTubeProxyService(BaseService):
+    
+    def __init__(self, log_callback=None):
+        super().__init__(log_callback)
+        self.esp_url = f"http://{ESP32_IP}/update_youtube"
+        self.api_key = YT_API_KEY
+        self.channel_id = YT_CHANNEL_ID
+        self.uploads_playlist_id = None
+        self.channel_name = ''
+        self.cached_comments = []
+    
+    def get_channel_info(self):
+        parts = 'statistics,snippet'
+        if not self.uploads_playlist_id:
+            parts += ',contentDetails'
+        
+        url = f"{YT_API_BASE}/channels"
+        params = {
+            'part': parts,
+            'id': self.channel_id,
+            'key': self.api_key
+        }
+        r = requests.get(url, params=params, timeout=10)
+        data = r.json()
+        
+        if 'error' in data:
+            msg = data.get('error', {}).get('message', 'Unknown error')
+            self.log(f"API: {msg[:35]}")
+            return None
+        
+        items = data.get('items', [])
+        if not items:
+            self.log("Channel not found")
+            return None
+        
+        item = items[0]
+        stats = item.get('statistics', {})
+        snippet = item.get('snippet', {})
+        
+        if not self.uploads_playlist_id:
+            content = item.get('contentDetails', {})
+            self.uploads_playlist_id = content.get('relatedPlaylists', {}).get('uploads', '')
+            self.log(f"Uploads playlist: {self.uploads_playlist_id[:20]}")
+        
+        self.channel_name = sanitize_for_display(snippet.get('title', ''))[:24]
+        
+        subs = int(stats.get('subscriberCount', 0))
+        views = int(stats.get('viewCount', 0))
+        vids = int(stats.get('videoCount', 0))
+        self.log(f"Channel: {self.channel_name} | Subs: {subs}")
+        
+        return {
+            'subscribers': subs,
+            'total_views': views,
+            'video_count': vids,
+        }
+    
+    def get_channel_comments(self):
+        url = f"{YT_API_BASE}/commentThreads"
+        params = {
+            'part': 'snippet',
+            'allThreadsRelatedToChannelId': self.channel_id,
+            'maxResults': 5,
+            'order': 'time',
+            'key': self.api_key
+        }
+        
+        try:
+            r = requests.get(url, params=params, timeout=10)
+            data = r.json()
+            
+            if 'error' in data:
+                reason = data.get('error', {}).get('errors', [{}])[0].get('reason', 'unknown')
+                self.log(f"Comments: {reason[:25]}")
+                return self.cached_comments
+            
+            comments = []
+            for item in data.get('items', []):
+                snippet = item['snippet']['topLevelComment']['snippet']
+                
+                text = sanitize_for_display(snippet.get('textDisplay', ''))
+                if not text.strip():
+                    text = '(emoji)'
+                author = sanitize_for_display(snippet.get('authorDisplayName', 'Unknown'))
+                published = snippet.get('publishedAt', '')
+                time_str = self.format_time_ago(published)
+                
+                comments.append({
+                    'author': author[:18],
+                    'text': text[:85],
+                    'time': time_str
+                })
+            
+            return comments
+        except Exception as e:
+            self.log(f"Comments err: {str(e)[:25]}")
+            return self.cached_comments
+    
+    @staticmethod
+    def format_time_ago(iso_time):
+        try:
+            dt = datetime.fromisoformat(iso_time.replace('Z', '+00:00'))
+            now = datetime.now(timezone.utc)
+            diff = now - dt
+            
+            if diff.days > 365:
+                return f"{diff.days // 365}y"
+            elif diff.days > 30:
+                return f"{diff.days // 30}mo"
+            elif diff.days > 0:
+                return f"{diff.days}d"
+            elif diff.seconds > 3600:
+                return f"{diff.seconds // 3600}h"
+            elif diff.seconds > 60:
+                return f"{diff.seconds // 60}m"
+            else:
+                return "now"
+        except:
+            return "--"
+    
+    def _run(self):
+        if not self.api_key or not self.channel_id:
+            self.log("Missing YOUTUBE_API_KEY or CHANNEL_ID")
+            self.state = ServiceState.ERROR
+            return
+        
+        self.log("Connecting to YouTube API...")
+        self.log(f"Channel ID: {self.channel_id[:16]}...")
+        comment_cycle = 0
+        
+        while not self._should_stop():
+            try:
+                stats = self.get_channel_info()
+                
+                if stats:
+                    comment_cycle += 1
+                    if comment_cycle >= 3 or not self.cached_comments:
+                        self.log("Fetching channel comments...")
+                        comments = self.get_channel_comments()
+                        if comments:
+                            self.cached_comments = comments
+                            self.log(f"Got {len(comments)} comments (channel-wide)")
+                        comment_cycle = 0
+                    
+                    data = {
+                        'subscribers': stats['subscribers'],
+                        'total_views': stats['total_views'],
+                        'video_count': stats['video_count'],
+                        'channel_name': self.channel_name,
+                        'comments': self.cached_comments
+                    }
+                    
+                    requests.post(self.esp_url, json=data, timeout=5)
+                    self.log(f"Sent -> Subs: {stats['subscribers']} | Vids: {stats['video_count']}")
+                else:
+                    self.log("No data from YouTube API")
+                    
+            except requests.exceptions.RequestException:
+                self.log("ESP32 unreachable")
+            except Exception as e:
+                self.log(f"Error: {str(e)[:30]}")
+            
+            if self._sleep(90):
+                break
+
 
 # --- CAMERA SERVER SERVICE ---
 class CameraServerService(BaseService):
@@ -695,13 +890,13 @@ class ESP32Dashboard(ctk.CTk):
         super().__init__()
         
         self.title("ESP32 Dashboard Controller")
-        self.geometry("500x750")
-        self.minsize(450, 700)
+        self.geometry("820x520")
+        self.minsize(780, 480)
         
-        icon_path = os.path.join(SCRIPT_DIR, "icon.ico")
-        if os.path.exists(icon_path):
+        self.icon_path = os.path.join(SCRIPT_DIR, "icon.ico")
+        if os.path.exists(self.icon_path):
             try:
-                self.iconbitmap(icon_path)
+                self.iconbitmap(self.icon_path)
             except:
                 pass
         
@@ -713,7 +908,7 @@ class ESP32Dashboard(ctk.CTk):
         self.main_frame.pack(fill="both", expand=True, padx=20, pady=20)
         
         self.header_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        self.header_frame.pack(fill="x", pady=(0, 20))
+        self.header_frame.pack(fill="x", pady=(0, 15))
         
         self.title_label = ctk.CTkLabel(self.header_frame, text="ESP32 Dashboard", font=ctk.CTkFont(size=28, weight="bold"))
         self.title_label.pack(side="left")
@@ -726,28 +921,91 @@ class ESP32Dashboard(ctk.CTk):
         self.all_btn.pack(side="right")
         
         self.subtitle = ctk.CTkLabel(self.main_frame, text="Click a card to toggle service on/off", font=ctk.CTkFont(size=13), text_color="#666666")
-        self.subtitle.pack(anchor="w", pady=(0, 15))
+        self.subtitle.pack(anchor="w", pady=(0, 10))
+        
+        # 2x2 Grid
+        self.grid_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        self.grid_frame.pack(fill="both", expand=True)
+        self.grid_frame.grid_columnconfigure(0, weight=1)
+        self.grid_frame.grid_columnconfigure(1, weight=1)
+        self.grid_frame.grid_rowconfigure(0, weight=1)
+        self.grid_frame.grid_rowconfigure(1, weight=1)
         
         self.cards = []
         
-        card1 = ServiceCard(self.main_frame, name="Camera Server", description="RTSP to MJPEG proxy for IP camera (port 5000)", service_class=CameraServerService, icon_emoji="CAM", on_toggle=self.on_service_toggle)
-        card1.pack(fill="x", pady=(0, 15))
+        card1 = ServiceCard(self.grid_frame, name="Camera Server", description="RTSP to MJPEG proxy (port 5000)", service_class=CameraServerService, icon_emoji="CAM", on_toggle=self.on_service_toggle)
+        card1.grid(row=0, column=0, padx=(0, 8), pady=(0, 8), sticky="nsew")
         self.cards.append(card1)
         
-        card2 = ServiceCard(self.main_frame, name="Cloudflare Proxy", description="Cloudflare security analytics to ESP32", service_class=CloudflareProxyService, icon_emoji="CF", on_toggle=self.on_service_toggle)
-        card2.pack(fill="x", pady=(0, 15))
+        card2 = ServiceCard(self.grid_frame, name="Cloudflare Proxy", description="Security analytics to ESP32", service_class=CloudflareProxyService, icon_emoji="CF", on_toggle=self.on_service_toggle)
+        card2.grid(row=0, column=1, padx=(8, 0), pady=(0, 8), sticky="nsew")
         self.cards.append(card2)
         
-        card3 = ServiceCard(self.main_frame, name="PC Monitor", description="CPU/RAM/Network monitoring to ESP32", service_class=PCMonitorService, icon_emoji="PC", on_toggle=self.on_service_toggle)
-        card3.pack(fill="x", pady=(0, 15))
+        card3 = ServiceCard(self.grid_frame, name="PC Monitor", description="CPU/RAM/Network to ESP32", service_class=PCMonitorService, icon_emoji="PC", on_toggle=self.on_service_toggle)
+        card3.grid(row=1, column=0, padx=(0, 8), pady=(8, 0), sticky="nsew")
         self.cards.append(card3)
+        
+        card4 = ServiceCard(self.grid_frame, name="YouTube Stats", description="YT channel stats & comments", service_class=YouTubeProxyService, icon_emoji="YT", on_toggle=self.on_service_toggle)
+        card4.grid(row=1, column=1, padx=(8, 0), pady=(8, 0), sticky="nsew")
+        self.cards.append(card4)
         
         self.footer = ctk.CTkLabel(self.main_frame, text="ESP32 Nexus Dash Controller", font=ctk.CTkFont(size=11), text_color="#444444")
         self.footer.pack(side="bottom", pady=(20, 0))
         
         self.after(1000, self.start_all_services)
         
-        self.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.protocol("WM_DELETE_WINDOW", self.hide_to_tray)
+        self.bind("<Unmap>", self.on_unmap)
+        
+        self.tray_icon = None
+        self.setup_tray_icon()
+        
+        self.after(50, self.hide_to_tray)
+        
+    def setup_tray_icon(self):
+        try:
+            image = Image.open(self.icon_path) if os.path.exists(self.icon_path) else Image.new('RGB', (64, 64), color='black')
+        except:
+            image = Image.new('RGB', (64, 64), color='black')
+            
+        menu = pystray.Menu(
+            item('Otwórz', self.show_from_tray, default=True),
+            item('Zakończ', self.quit_app)
+        )
+        
+        self.tray_icon = pystray.Icon("ESP32Dashboard", image, "ESP32 Dashboard", menu)
+        threading.Thread(target=self.tray_icon.run, daemon=True).start()
+
+    def on_unmap(self, event):
+        try:
+            if str(event.widget) == str(self) and self.state() == 'iconic':
+                self.after(10, self.hide_to_tray)
+        except:
+            pass
+    
+    def hide_to_tray(self):
+        self.withdraw()
+            
+    def show_from_tray(self, icon=None, item=None):
+        self.after(0, self.restore_window)
+        
+    def restore_window(self):
+        self.deiconify()       
+        self.state('normal')  
+        self.lift()             
+        self.focus_force()      
+        
+    def quit_app(self, icon=None, item=None):
+        if self.tray_icon:
+            self.tray_icon.stop()
+        self.after(0, self._perform_quit)
+        
+    def _perform_quit(self):
+        for card in self.cards:
+            card.force_stop()
+        time.sleep(0.5)
+        self.destroy()
+        os._exit(0) 
     
     def start_all_services(self):
         def start_next(index=0):
@@ -794,13 +1052,6 @@ class ESP32Dashboard(ctk.CTk):
     
     def on_service_toggle(self, name, is_active):
         self.after(100, self.update_all_button)
-    
-    def on_closing(self):
-        for card in self.cards:
-            card.force_stop()
-        
-        time.sleep(0.5)
-        self.destroy()
 
 
 def main():
