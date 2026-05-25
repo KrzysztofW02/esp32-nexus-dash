@@ -307,7 +307,7 @@ void drawThreatTypesPanel() {
     gfx->setTextColor(CF_ORANGE);
     gfx->setCursor(x + 15, barY + 11);
     gfx->print("DDoS");
-    drawNeonBar(x + labelW, barY, barW, barH, cfDDoS, maxCount, CF_RED);
+    drawNeonBar(x + labelW, barY, barW, barH, cfDDoS, maxCount, CF_ORANGE);
     gfx->setCursor(countX, barY + 11);
     gfx->print(cfDDoS);
     barY += 22;
@@ -316,7 +316,7 @@ void drawThreatTypesPanel() {
     gfx->setTextColor(CF_RED);
     gfx->setCursor(x + 15, barY + 11);
     gfx->print("Bot");
-    drawNeonBar(x + labelW, barY, barW, barH, cfBot, maxCount, CF_ORANGE);
+    drawNeonBar(x + labelW, barY, barW, barH, cfBot, maxCount, CF_RED);
     gfx->setCursor(countX, barY + 11);
     gfx->print(cfBot);
     barY += 22;
