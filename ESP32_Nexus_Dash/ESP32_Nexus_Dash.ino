@@ -13,11 +13,12 @@
 #include "DashboardPC.h" 
 #include "DashboardCamera.h"
 #include "DashboardCloudflare.h"
+#include "DashboardYouTube.h"
 #include "WebInterface.h"
 
 // GLOBAL VARIABLES
 WebServer server(80);
-int currentDashboard = 0; // 0 = Finance, 1 = PC Monitor, 2 = Camera, 3 = Cloudflare Analytics
+int currentDashboard = 0; // 0 = Finance, 1 = PC Monitor, 2 = Camera, 3 = Cloudflare, 4 = YouTube
 bool needRedrawStatic = false; 
 
 // WIFI DATA 
@@ -66,6 +67,18 @@ Arduino_RGB_Display *gfx = new Arduino_RGB_Display(1024, 600, rgbpanel);
 // Time
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", 3600, 60000); 
+
+const char* TIMEZONE = "CET-1CEST,M3.5.0,M10.5.0/3";
+
+String getLocalTimeStr() {
+    struct tm timeinfo;
+    if (getLocalTime(&timeinfo, 100)) {
+        char buf[9];
+        strftime(buf, sizeof(buf), "%H:%M:%S", &timeinfo);
+        return String(buf);
+    }
+    return "--:--:--";
+}
 
 // FINANCIAL VARIABLES 
 volatile float courseBTC = 0.0; float oldBTC = 0.0; volatile float change24BTC = 0.0; volatile float change1MBTC = 0.0; volatile float liveChangeBTC = 0.0; volatile int dirBTC = 0;           
@@ -125,8 +138,7 @@ void drawTopBarStatic() {
 }
 
 void updateTopClock() {
-  timeClient.update();
-  String timeStr = timeClient.getFormattedTime();
+  String timeStr = getLocalTimeStr();
   gfx->fillRect(440, 0, 160, 48, C_BAR_BG);
   gfx->setFont(u8g2_font_profont29_mn);
   gfx->setTextSize(1);
@@ -318,12 +330,14 @@ void setup() {
   server.on("/set", handleSet);
   server.on("/update_pc", HTTP_POST, handleUpdatePC);
   server.on("/update_cloudflare", HTTP_POST, handleUpdateCloudflare);
+  server.on("/update_youtube", HTTP_POST, handleUpdateYouTube);
   
   server.begin();
   Serial.println("Web server started");
 
   timeClient.begin();
   timeClient.update();
+  configTzTime(TIMEZONE, "pool.ntp.org", "time.google.com");
 
   gfx->fillScreen(C_BG);
   drawTopBarStatic();
@@ -354,7 +368,7 @@ void loop() {
       
       gfx->fillScreen(C_BG);
 
-      if (currentDashboard != 2 && currentDashboard != 3) {
+      if (currentDashboard != 2 && currentDashboard != 3 && currentDashboard != 4) {
           drawTopBarStatic(); 
           updateTopClock();
       }
@@ -367,12 +381,14 @@ void loop() {
         drawStaticInterfaceCamera();
       } else if (currentDashboard == 3) {
         drawStaticInterfaceCloudflare();
+      } else if (currentDashboard == 4) {
+        drawStaticInterfaceYouTube();
       }
       needRedrawStatic = false;
   }
 
   // CLOCK UPDATE
-  if (currentDashboard != 2 && currentDashboard != 3) {
+  if (currentDashboard != 2 && currentDashboard != 3 && currentDashboard != 4) {
       if (currentMillis - lastClockUpdate >= 1000) {
         lastClockUpdate = currentMillis;
         updateTopClock();
@@ -400,6 +416,10 @@ void loop() {
   // Dashboard 3: Cloudflare Security
   else if (currentDashboard == 3) {
     refreshDynamicDataCloudflare();
+  }
+  // Dashboard 4: YouTube
+  else if (currentDashboard == 4) {
+    refreshDynamicDataYouTube();
   } else {
     delay(10);
   }

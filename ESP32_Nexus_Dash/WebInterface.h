@@ -4,6 +4,7 @@
 #include <WebServer.h>
 #include "DashboardPC.h" 
 #include "DashboardCloudflare.h"
+#include "DashboardYouTube.h"
 
 extern WebServer server;
 extern int currentDashboard;
@@ -35,6 +36,21 @@ void handleUpdateCloudflare() {
     if (server.hasArg("plain")) {
         String body = server.arg("plain");
         handleCloudflareJson(body);
+        server.send(200, "text/plain", "OK");
+    } else {
+        server.send(400, "text/plain", "No Data");
+    }
+}
+
+void handleUpdateYouTube() {
+    if (currentDashboard != 4) {
+        server.send(200, "text/plain", "Ignored - Dashboard inactive");
+        return; 
+    }
+
+    if (server.hasArg("plain")) {
+        String body = server.arg("plain");
+        handleYouTubeJson(body);
         server.send(200, "text/plain", "OK");
     } else {
         server.send(400, "text/plain", "No Data");
@@ -88,6 +104,7 @@ void handleRoot() {
   html += ".card.pc{--card-color:var(--accent-purple);--card-glow:rgba(168,85,247,0.1);}";
   html += ".card.camera{--card-color:var(--accent-pink);--card-glow:rgba(236,72,153,0.1);}";
   html += ".card.security{--card-color:var(--accent-orange);--card-glow:rgba(249,115,22,0.1);}";
+  html += ".card.youtube{--card-color:#ff0000;--card-glow:rgba(255,0,0,0.1);}";
   
   // Card content
   html += ".card-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px;}";
@@ -145,6 +162,14 @@ void handleRoot() {
   html += "<h3 class='card-title'>Cloudflare Security</h3>";
   html += "<p class='card-desc'>Monitor security events, blocked threats and traffic analytics in real-time.</p>";
   html += "<div class='card-footer'><span class='card-action'>Open Dashboard <span class='arrow'>→</span></span></div>";
+  html += "</a>";
+  
+  // Card 5 - YouTube
+  html += "<a href='/set?mode=4' class='card youtube " + String(currentDashboard == 4 ? "active" : "") + "'>";
+  html += "<div class='card-header'><div class='icon-wrap'>&#9654;</div><span class='badge'>Active</span></div>";
+  html += "<h3 class='card-title'>YouTube Dashboard</h3>";
+  html += "<p class='card-desc'>Live subscriber count, latest comments and channel analytics from YouTube.</p>";
+  html += "<div class='card-footer'><span class='card-action'>Open Dashboard <span class='arrow'>&rarr;</span></span></div>";
   html += "</a>";
   
   html += "</div>";
